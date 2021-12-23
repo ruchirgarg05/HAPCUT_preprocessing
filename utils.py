@@ -85,6 +85,7 @@ def generate_matrix_for_visualization(ref_H, false_variant_locs,
         print(" ".join([str(v) for v in np.array(ref_H[0]).astype("int")]))
         print(" ".join([str(v) for v in np.array(ref_H[1]).astype("int")]))
         print("\n")
+        
     print_false_variants_and_ref_H(ref_H, false_variant_locs)
     matrix = [["-" for _ in range(reference_length)] for _ in range(len(hap_samples))]
     for idx, ( (s,e),  sa ) in enumerate(zip(st_en, hap_samples)):
@@ -229,3 +230,86 @@ def get_probability_fragments_from_same_fragment(reads, st_ens, index, error_rat
             same *= error_rate
             diff *= (1- error_rate)
     return same, diff
+
+
+def get_overlapping_fragments_for_variants_sites(reads, st_ens, index):
+    """
+    Return the fragments which contain the sites with variant at "index".
+    """
+    reads, st_ens = cluster_fragments(reads, st_ens)
+    overalapping_frags = []
+    overlapping_st_ens = []
+    for read, st_en in zip(reads, st_ens):
+        if st_en[0] > index:
+            break
+        if index>=st_en[0] and index<=st_en[1]:
+            overalapping_frags.append(read)
+            overlapping_st_ens.append(st_en)
+    return overalapping_frags, overlapping_st_ens
+
+
+def get_likelihood_heterozygous_genotype(reads, st_en, index, qual):
+    """
+    Return the likelihood of the site at index being a heterozygous genotype, for the reads 
+    - coming from same Haplotype,
+    - coming from the different Haplotype.
+    """
+    #import ipdb;ipdb.set_trace()
+    assert len(reads) == 2 and len(st_en)==2
+    assert index>=max(st_en[0][0], st_en[1][0]) and index<=min(st_en[0][1], st_en[1][1])
+    index0, index1 = index - st_en[0][0] -1 , index - st_en[1][0] - 1
+    if reads[0][index0] == reads[1][index1]:
+        # Same value at the site
+        likelihood_same = ((1-qual)*(1-qual))/2 + (qual*qual)/2
+        likelihood_diff = qual * (1 - qual)
+    else:
+        # Different values at the given site
+        likelihood_same = qual * (1 - qual)
+        likelihood_diff = ((1-qual)*(1-qual))/2 + (qual*qual)/2
+    return likelihood_same, likelihood_diff
+
+ 
+
+def calculate_likelihood_of_heterozygous_site(ref_H, false_variant_locs, reads, st_en, index, qual):
+    """
+    Given the reads what is the likelihood of allele lying at index being 
+    a heterozygous genotype.
+    param qual: the qual of the reads, currently it is a constant.maketrans()
+    # TODO: Make qual an array which stores the qual of each of the index.
+    """
+    #import ipdb;ipdb.set_trace()
+    reads, st_en = cluster_fragments(reads, st_en)
+    overlapping_reads, overlapping_st_en = get_overlapping_fragments_for_variants_sites(reads, st_en, index)    
+    #generate_matrix_for_visualization(ref_H, false_variant_locs, overlapping_reads, overlapping_st_en)
+    num_frags = len(overlapping_reads)
+    
+    # Let the first bit for H1 be 0 and first bit of H2 = 1( without loss of generality) 
+    # Likelihood for the reads lying in H1, H2 given i fragments are stored in the ith index of the
+    # array likelihood_per_reads
+    
+    #ipdb.set_trace()
+    frag_0 = (overlapping_reads[0], overlapping_st_en[0])
+    likelihood_per_reads = [(1-qual, qual) if overlapping_reads[0][0] == 0 else (qual, 1-qual)]
+    
+    for i in range(1, num_frags):
+        frag_1 = (overlapping_reads[i], overlapping_st_en[i])
+        r, s_e = [frag_0[0], frag_1[0]],  [frag_0[1], frag_1[1]]
+        
+        prob_same, prob_diff = get_probability_fragments_from_same_fragment(r, s_e, index, qual)
+             
+        same_lik, diff_lik = get_likelihood_heterozygous_genotype(r, s_e, index, qual)
+        
+        l1_prev, l2_prev = likelihood_per_reads[-1]
+        
+        # l1 is the likelihood that the xi fragment is sampled from the H1
+        # l2 is the likelihood that the xi fragment is sampled from the H2.         
+        l1 = l1_prev*prob_same*same_lik + l2_prev*prob_diff*diff_lik
+        l2 = l1_prev*prob_diff*diff_lik + l2_prev*prob_same*same_lik
+        
+        likelihood_per_reads.append((l1, l2))       
+        
+        frag_0 = frag_1
+    # Finally my likelihood per_reads would contain,
+    # the likelihood of the site at index to be heterozygous
+    heteroz_likelihood = likelihood_per_reads[-1][0] + likelihood_per_reads[-1][1]
+    return  heteroz_likelihood
