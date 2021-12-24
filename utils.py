@@ -189,7 +189,7 @@ def simulate_haplotypes_errors(
 def cluster_fragments(hap_samples, st_en):
   #import pdb;pdb.set_trace()  
   H_samples = [((st,en), sample) for (st, en), sample in zip(st_en, hap_samples)]
-  H_samples = sorted(H_samples, key=lambda V: (V[0], -1*V[1]))
+  H_samples = sorted(H_samples, key=lambda V: (V[0][0], -1*V[0][1]))
   st_en = [(st, en) for (st, en), _ in H_samples]
   samples = [sample for _, sample in H_samples]
   return samples, st_en
@@ -335,15 +335,16 @@ def remove_site_from_samples(samples, st_en, index):
         nreads.append(r)
     return nreads, st_en
 
-def remove_false_variants(reads, st_en, qual, threshold, ref_H):
+def remove_false_variants(reads, st_en, qual, threshold, ref_H=None):
     """
     Removes the sites which has less likelihood of it being heterozygous.
     """
+    import pdb;pdb.set_trace()
     while True:
         likelihood_false_variants = []        
-        for i in range(len(ref_H)):
+        for i in range(len(ref_H[0])):
             likelihood_false_variants.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i, qual, ref_H), i))
-        
+        pdb.set_trace()
         likelihood_false_variants = sorted(likelihood_false_variants)
         false_variant_exists = False
         false_variant_locs = []
