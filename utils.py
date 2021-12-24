@@ -189,7 +189,7 @@ def simulate_haplotypes_errors(
 def cluster_fragments(hap_samples, st_en):
   #import pdb;pdb.set_trace()  
   H_samples = [((st,en), sample) for (st, en), sample in zip(st_en, hap_samples)]
-  H_samples = sorted(H_samples, key=lambda V: V[0])
+  H_samples = sorted(H_samples, key=lambda V: (V[0], -1*V[1]))
   st_en = [(st, en) for (st, en), _ in H_samples]
   samples = [sample for _, sample in H_samples]
   return samples, st_en
@@ -268,9 +268,8 @@ def get_likelihood_heterozygous_genotype(reads, st_en, index, qual):
         likelihood_diff = ((1-qual)*(1-qual))/2 + (qual*qual)/2
     return likelihood_same, likelihood_diff
 
- 
 
-def calculate_likelihood_of_heterozygous_site(ref_H, false_variant_locs, reads, st_en, index, qual):
+def calculate_likelihood_of_heterozygous_site(reads, st_en, index, qual, ref_H=None, false_variant_locs=None):
     """
     Given the reads what is the likelihood of allele lying at index being 
     a heterozygous genotype.
@@ -282,6 +281,10 @@ def calculate_likelihood_of_heterozygous_site(ref_H, false_variant_locs, reads, 
     overlapping_reads, overlapping_st_en = get_overlapping_fragments_for_variants_sites(reads, st_en, index)    
     #generate_matrix_for_visualization(ref_H, false_variant_locs, overlapping_reads, overlapping_st_en)
     num_frags = len(overlapping_reads)
+    if num_frags == 0:
+        # There are no overlapping reads covering the given site.
+        # return None since we dont have anything to compare it to.
+        return np.nan
     
     # Let the first bit for H1 be 0 and first bit of H2 = 1( without loss of generality) 
     # Likelihood for the reads lying in H1, H2 given i fragments are stored in the ith index of the
@@ -313,3 +316,41 @@ def calculate_likelihood_of_heterozygous_site(ref_H, false_variant_locs, reads, 
     # the likelihood of the site at index to be heterozygous
     heteroz_likelihood = likelihood_per_reads[-1][0] + likelihood_per_reads[-1][1]
     return  heteroz_likelihood
+
+
+
+def remove_site_from_samples(samples, st_en, index):
+    """
+    Remove the site from all the possible fragments from the given sample.
+    """
+    reads, st_en = cluster_fragments(samples, st_en)
+    nreads = []
+    for r, s_e in zip(reads, samples):
+        if index > s_e[0]:
+            # Index are sorted by start index
+            break
+        if index>=s_e[0] and index<=s_e[1]:
+            idx = index - s_e[0]
+            r[idx] = -1
+        nreads.append(r)
+    return nreads, st_en
+
+def remove_false_variants(reads, st_en, qual, threshold, ref_H):
+    """
+    Removes the sites which has less likelihood of it being heterozygous.
+    """
+    while True:
+        likelihood_false_variants = []        
+        for i in range(len(ref_H)):
+            likelihood_false_variants.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i, qual, ref_H), i))
+        
+        likelihood_false_variants = sorted(likelihood_false_variants)
+        false_variant_exists = False
+        false_variant_locs = []
+        for likelihood, idx in likelihood_false_variants:
+            if likelihood < threshold:
+                false_variant_exists = True
+                reads, st_en = remove_site_from_samples(reads, st_en, idx)
+        if not false_variant_exists:
+            break
+    return reads, st_en
