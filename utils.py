@@ -335,21 +335,32 @@ def remove_site_from_samples(samples, st_en, index):
         nreads.append(r)
     return nreads, st_en
 
+
+def get_likelihood_without_haplotype_information(reads, st_en, ref_H):
+    reads, st_en = cluster_fragments(reads, st_en)
+    likelihoods = []
+    for i in range(len(ref_H[0])):
+        overlapping_reads = get_overlapping_fragments_for_variants_sites(reads, st_en, i)
+        likelihoods.append(1/(1<<len(overlapping_reads)))
+    return likelihoods  
+
+
 def remove_false_variants(reads, st_en, qual, threshold, ref_H=None):
     """
     Removes the sites which has less likelihood of it being heterozygous.
     """
     import pdb;pdb.set_trace()
     while True:
-        likelihood_false_variants = []        
+        likelihood_false_variants = []
+        likelihood_no_hap_info = get_likelihood_without_haplotype_information(reads, st_en, ref_H)
+              
         for i in range(len(ref_H[0])):
             likelihood_false_variants.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i, qual, ref_H), i))
         pdb.set_trace()
         likelihood_false_variants = sorted(likelihood_false_variants)
         false_variant_exists = False
-        false_variant_locs = []
         for likelihood, idx in likelihood_false_variants:
-            if likelihood < threshold:
+            if likelihood < likelihood_no_hap_info[idx]:
                 false_variant_exists = True
                 reads, st_en = remove_site_from_samples(reads, st_en, idx)
         if not false_variant_exists:
