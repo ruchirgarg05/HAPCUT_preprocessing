@@ -7,7 +7,7 @@ import random
 
 pd.set_option('display.max_columns', 40)
 
-def create_reference_hap(ref_length, p=0.5, false_variance=0.0):
+def create_reference_hap(ref_length, p=0.5, false_variance=0.0, print_info=True):
   """
   param false_variance: If set to true, there are some homozygous genotypes 
   at random locations, and also return its positions. THis is to simulate the false 
@@ -18,10 +18,7 @@ def create_reference_hap(ref_length, p=0.5, false_variance=0.0):
   reference_hap2 = np.logical_not(reference_hap1)
   haps = [reference_hap1, reference_hap2]
   false_variant_locs = []
-  if false_variance > 0.:
-    #import pdb;pdb.set_trace()
-    #import pdb;pdb.set_trace()
-    
+  if false_variance > 0.:    
     # Make the ref hap 0/0 or 1/1 in both h1 or h2.
     num_false_variants = int(len(reference_hap1) * false_variance) 
     false_variant_locs = np.unique(np.random.randint(low = 0, 
@@ -34,7 +31,8 @@ def create_reference_hap(ref_length, p=0.5, false_variance=0.0):
       
     for loc in false_variant_locs:
       assert haps[0][loc] == haps[1][loc]
-    print_false_variants_and_ref_H(haps, false_variant_locs)  
+    if print_info:
+      print_false_variants_and_ref_H(haps, false_variant_locs)  
         
   return haps, false_variant_locs
 

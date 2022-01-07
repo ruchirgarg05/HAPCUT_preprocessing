@@ -119,11 +119,7 @@ def calculate_likelihood_of_heterozygous_site(reads, st_en, index, qual, ref_H=N
         r, s_e = [frag_0[0], frag_1[0]],  [frag_0[1], frag_1[1]]
         
         prob_same, prob_diff = get_probability_fragments_from_same_fragment(r, s_e, index, qual)             
-        same_lik, diff_lik = get_likelihood_heterozygous_genotype(r, s_e, index, qual)
-        # print(prob_same, prob_diff)
-        # print(same_lik, diff_lik)
-        # generate_matrix_for_visualization(ref_H, [], r, s_e)
-        
+        same_lik, diff_lik = get_likelihood_heterozygous_genotype(r, s_e, index, qual)        
         l1_prev, l2_prev = likelihood_per_reads[-1]
         
         # l1 is the likelihood that the xi fragment is sampled from the H1
@@ -142,6 +138,7 @@ def calculate_likelihood_of_heterozygous_site(reads, st_en, index, qual, ref_H=N
 def remove_site_from_samples(samples, st_en, index):
     """
     Remove the site from all the possible fragments from the given sample.
+    Implementation detail: Do not delete the variant site, simply mark it as "_"
     """
     reads, st_en = cluster_fragments(samples, st_en)
     nreads = []
@@ -165,26 +162,28 @@ def get_likelihood_without_haplotype_information(reads, st_en, ref_H):
     return likelihoods
 
 
-def remove_false_variants(reads, st_en, qual, threshold, ref_H=None):
+def remove_false_variants(reads, st_en, qual, ref_H=None):
     """
     Removes the sites which has less likelihood of it being heterozygous.
     """
-    import ipdb;ipdb.set_trace()
+    #import ipdb;ipdb.set_trace()
+    false_variants = []
     while True:
         likelihood_false_variants = []
         likelihood_no_hap_info = get_likelihood_without_haplotype_information(reads, st_en, ref_H)
               
         for i in range(len(ref_H[0])):
             likelihood_false_variants.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i, qual, ref_H), i))
-        ipdb.set_trace()
+        #ipdb.set_trace()
         likelihood_false_variants = sorted(likelihood_false_variants)
-        false_variant_exists = False
+        false_variant_locs = []
         for likelihood, idx in likelihood_false_variants:
             if likelihood < likelihood_no_hap_info[idx]:
-                false_variant_exists = True
-                reads, st_en = remove_site_from_samples(reads, st_en, idx)
-        if not false_variant_exists:
+                false_variant_locs.append(idx)    
+        if not len(false_variant_locs):
             break
-    return reads, st_en
-  # TODO: Normalize the reads . 
-  # TODO: work in logspace (maybe).
+        false_variants += false_variant_locs   
+        for idx in false_variant_locs:
+            # TODO: Remove all the false variants together.
+            reads, st_en = remove_site_from_samples(reads, st_en, idx)
+    return reads, st_en, false_variants
