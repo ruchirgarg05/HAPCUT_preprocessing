@@ -1,200 +1,497 @@
-# imports
-import math
 import numpy as np
 import pandas as pd
-import os
-import random
+import allel
 
-pd.set_option('display.max_columns', 40)
 
-def create_reference_hap(ref_length, p=0.5, false_variance=0.0, print_info=True):
-  """
-  param false_variance: If set to true, there are some homozygous genotypes 
-  at random locations, and also return its positions. THis is to simulate the false 
-  variant reads in the sequenced fragments.
-  """
-  p = 0.5
-  reference_hap1 = np.random.choice(a=[False, True], size=(ref_length), p=[p, 1-p])
-  reference_hap2 = np.logical_not(reference_hap1)
-  haps = [reference_hap1, reference_hap2]
-  false_variant_locs = []
-  if false_variance > 0.:    
-    # Make the ref hap 0/0 or 1/1 in both h1 or h2.
-    num_false_variants = int(len(reference_hap1) * false_variance) 
-    false_variant_locs = np.unique(np.random.randint(low = 0, 
-                                                     high=ref_length,
-                                                     size=num_false_variants))
-    # Flip the bits in either reference hap1 or reference hap2.
-    flip_h1_h2 = np.random.choice([0, 1 ], size=num_false_variants)
-    for location, h1_h2 in zip(false_variant_locs, flip_h1_h2):
-      haps[h1_h2][location] = not haps[h1_h2][location]
-      
-    for loc in false_variant_locs:
-      assert haps[0][loc] == haps[1][loc]
-    if print_info:
-      print_false_variants_and_ref_H(haps, false_variant_locs)  
-        
-  return haps, false_variant_locs
+def read_fragments(fragments_path):
+	''' 
+	Reads fragments file and returns read allele and quality data as 
+		numpy matrices. Sites in matrices where there is no data are np.nan
 
-def generate_fragments(ref_H, read_length, std_read_length, coverage):
-    read_length = int(read_length)
-    ref_length = len(ref_H[0])
-    num_reads_for_read_coverage = int(ref_length * coverage / read_length)
-    # Pick the length of the read length from a normal distribution centered at
-    # read_lenth and variance as std_read_length
-    read_lengths = np.array(
-        np.random.normal(loc = read_length, scale = std_read_length, 
-                         size = num_reads_for_read_coverage), 
-                         dtype="int32")
-    
-    # Uniformly choose start points from the reference haplotype, h1 or h2. 
-    reads_start_idx = np.random.randint(low = 0, high=ref_length-read_length, 
-                                        size=num_reads_for_read_coverage)
-    
-    reads_st_en = []
-    #reads = np.array([reads_start_idx, reads_start_idx + read_length])
-    for st_idx, read_len in zip(reads_start_idx, read_lengths):
-      if st_idx + read_len > ref_length - 1:
-        en = ref_length - 1
-      else:
-        en = st_idx + read_len
-      reads_st_en.append( (st_idx, en ) )
+	Args:	path to a fragments.txt file
 
-    #reads_st_en = np.array(reads_st_en)
-    #import pdb;pdb.set_trace()
-    # We have the st and en of the reads, choose either h1 or h2 from H and 
-    # sample it. Sample from S1 if True else sample from S2.
-    h1_or_h2 = np.array(
-        np.less(np.random.uniform(0, 1, num_reads_for_read_coverage), 0.5), 
-        dtype="int")
-    
-    hap_samples = [np.array(ref_H[v][st:en]).astype("int") for v, (st, en) in zip(h1_or_h2, reads_st_en)]
-    assert len(hap_samples) == num_reads_for_read_coverage
-    return hap_samples, reads_st_en,
+	Returns 3 numpy arrays:
+		array of fragment_ids corresponding to rows
+		matrix of allele values {0,1,np.nan} where rows correspond to samples 
+			and cols to sites
+		matrix of Phred quality scores or np.nan where no read
+	'''
+	frag_ids, row_col_pairs, allele_vals, qual_scores = read_fragments_arrays(
+		fragments_path
+	)
 
-def print_false_variants_and_ref_H(ref_H, false_variant_locs):
-        # print("\n")    
-        # print(" ".join([str(v) for v in np.array(ref_H[0]).astype("int")]))
-        # print(" ".join([str(v) for v in np.array(ref_H[1]).astype("int")]))
-        # print("\n")
-        print(f"False variant locations are {sorted(false_variant_locs)}") 
-        print("reference haplotype values for the variants are:")
-        print(pd.DataFrame(np.array([h.astype("int") for h in ref_H]), 
-                       columns = [f"{i}" for i in range(len(ref_H[0]))],
-                       index=["H1", "H2"]).to_string())        
+	allele_mat = np.full(row_col_pairs.max(axis=0)+1, np.nan)
+	allele_mat[row_col_pairs[:,0], row_col_pairs[:,1]] = allele_vals
 
-        
-def generate_matrix_for_visualization(ref_H, false_variant_locs, 
-                                      hap_samples, st_en):
-    reference_length = len(ref_H[0])  
-    print_false_variants_and_ref_H(ref_H, false_variant_locs)
-    matrix = [["-" for _ in range(reference_length)] for _ in range(len(hap_samples))]
-    for idx, ( (s,e),  sa ) in enumerate(zip(st_en, hap_samples)):
-        for i, v in zip(range(s, e), sa):
-            if v != -1:
-                matrix[idx][i] = str(int(v))
-    
-    # for m in matrix:
-    #     print(" ".join(str(v) for v in m) )
-    with pd.option_context('display.max_rows', 100, 'display.max_columns', None):  # more options can be specified also
-        print(pd.DataFrame(np.array(matrix),
-                           columns = [f"{i}" for i in range(len(ref_H[0]))], 
-                           index=[f"f_{i}" for i in range(len(matrix))]).to_string())   
+	qual_mat = np.full(row_col_pairs.max(axis=0)+1, np.nan)
+	qual_mat[row_col_pairs[:,0], row_col_pairs[:,1]] = qual_scores
 
-def simulate_haplotypes_errors(
-        hap_samples, reads_st_en,
-        false_variant_locs, 
-        switch_error_rate=0.0, 
-        miscall_error_rate=0.0, 
-        missing_error_rate=0.0
-        ):
-    """
-    param read_length: Avg read length.
-    param std_read_length How the read lengths is distributed around the read_length, which is avg read length. 
-    param coverage: Number of avegage reads per genome for the reference over snps
-    param reference_length: THe length of the reference haptype 
-    param false_variance:
-    param switch_error_rate: 
-    param missing_error_rate:
-    param miscall_error_rate:
-    """ 
-    # Simulate switch errors:
-    sw_hap_samples = []
-    fragfilecontent = []
-    # Get the switch error for each of the sample.
-    # Get the missing error for each of the sample 
-    qual = '~' if miscall_error_rate < 1e-9 else str(int(-10*math.log10(miscall_error_rate)))
-    
+	return frag_ids, allele_mat, qual_mat
 
-    for sample, x in zip(hap_samples, reads_st_en):
-      #import pdb;pdb.set_trace()      
-      assert len(sample) == abs(x[1] - x[0])  
-      switch_error = np.less( np.random.uniform(0, 1, size=len(sample)) , switch_error_rate)
-      miscall_error = np.less(np.random.uniform(0, 1, size=len(sample)) , miscall_error_rate)      
-      missing_error = np.less(np.random.uniform(0, 1, size=len(sample)) , missing_error_rate)
-      
-      # Simulate false variants
-      # For the samples which have false variant locations in it, we flip the 
-      # bits sampled with probability 0.5, from either of the samples.
-      for idx in range(x[0], x[1]):
-        if idx in false_variant_locs:
-          if np.random.random() < 0.5:
-            sample[idx-x[0]] = not sample[idx-x[0]]
-            
 
-      # Simulate switch errors
-      switch_idxs = list(np.nonzero(switch_error))
-      is_switched = False
-      new_sample = []
-      for sa, sw in zip(sample, switch_error):
-        if sw:
-          is_switched = not is_switched
-          if is_switched:
-            new_sample.append(not sa)
-          else:
-            new_sample.append(sa) 
-        else:
-            new_sample.append(sa) 
-            
-      updated_sample = new_sample
-      assert len(updated_sample) == abs(x[1] - x[0])
+def read_fragments_arrays(fragments_path):
+	''' 
+	Reads fragments file and returns data as numpy arrays of corresponding
+		indices and data
 
-      # Simulate miscall errors      
-      new_sample = []
-      for sa, miscall in zip(updated_sample, miscall_error):
-        if miscall:
-          new_sample.append(not sa)
-        else:
-          new_sample.append(sa)
-      
-      updated_sample = new_sample 
-      assert len(updated_sample) == abs(x[1] - x[0])
+	Args:	path to a fragments.txt file
 
-      # Simulate missing errors  
-      new_sample = []
+	Returns 4 numpy arrays:
+		fragment_ids corresponding to rows
+		row col indices for the data in allele_vals and qual_scores
+		allele values {0,1} at row,col locs
+		Phred quality scores at row,col locs
+	'''
+	with open(fragments_path) as f:
 
-      for sa, missing in zip(updated_sample, missing_error):
-        if missing:
-          new_sample.append(-1)
-        else:
-          new_sample.append(sa)
-      assert len(new_sample) == abs(x[1] - x[0])
-      # INdex of the variant, reference hap value, misscall rate
-        
-      fragfilecontent.append((x, new_sample, qual))      
-      sw_hap_samples.append(new_sample)
-        
-    #import pdb;pdb.set_trace()
-    # Update the hap samples with the new samples
-    hap_samples = [list(np.array(s, dtype="int32")) for s in sw_hap_samples]
+		frag_ids = []		# fragment ids from col 2
+		row_col_pairs = []	# row,col indices coresponding to allele values
+		allele_vals = []	# 	and quality scores as matrices
+		qual_scores = []
 
-    return hap_samples, reads_st_en, fragfilecontent
-  
+		row_ind = 0
 
-def cluster_fragments(hap_samples, st_en):
-  #import pdb;pdb.set_trace()  
-  H_samples = [((st,en), sample) for (st, en), sample in zip(st_en, hap_samples)]
-  H_samples = sorted(H_samples, key=lambda V: (V[0][0], -1*V[0][1]))
-  st_en = [(st, en) for (st, en), _ in H_samples]
-  samples = [sample for _, sample in H_samples]
-  return samples, st_en
+		for line in f:
+			line_data = line.strip().split()
+			frag_ids.append(line_data[1])
+
+			# get sample's row,col pairs and allele vals
+			block_data = line_data[2:-1]
+
+			for i in range(0, len(block_data), 2):
+				block_start_ind = int(block_data[i])
+
+				for start_offset in range(len(block_data[i + 1])):
+					row_col_pairs.append(
+						(row_ind, block_start_ind + start_offset)
+					)
+					allele_vals.append(block_data[i + 1][start_offset])
+
+			# add quality scores
+			qual_str = line_data[-1]
+			for char in qual_str:
+				qual_scores.append(ord(char) - 33)
+
+			row_ind += 1
+
+		# set indices to start at 0
+		row_col_pairs = np.array(row_col_pairs)
+		row_col_pairs -= row_col_pairs.min(axis=0, keepdims=True)
+
+		return (
+			np.array(frag_ids),
+			row_col_pairs,
+			np.array(allele_vals).astype(int),
+			np.array(qual_scores)
+		)
+
+
+def get_bed_mask(bed_path, ls_callset_pos, chrom='chr20'):
+	''' 
+	Reads areas in GIAB from .bed and uses to mask longshot callset positions
+	'''
+	with open(bed_path) as f:
+		starts = []
+		ends = []
+
+		for line in f:
+			line_data = line.strip().split()
+
+			if line_data[0] == chrom:
+				starts.append(line_data[1])
+				ends.append(line_data[2])
+
+	starts = np.array(starts).astype(int)
+	ends = np.array(ends).astype(int)
+
+	in_bed_range = []
+
+	for ls_pos in ls_callset_pos:
+		in_bed_range.append(
+			np.any((starts <= ls_pos) & (ends > ls_pos))
+		)
+
+	return np.array(in_bed_range)
+
+
+def get_true_variants(longshot_vcf_path, ground_truth_vcf_path, giab_bed_path,
+						return_vcfs=False):
+	''' 
+	Finds true/false variants in fragments file using GIAB ground truth vcf
+
+	Args: 
+		longshot_vcf_path: path to "2.0.realigned_genotypes.vcf" for longshot run
+			that produced the fragments.txt file being used
+		ground_truth_vcf_path: path to GIAB ground truth vcf
+		giab_bed_path: giab ground truth corresponding .bed
+		return_vcfs: if the longshot and ground_truth vcfs should be returned.
+			Will be returned as callsets
+	
+	Returns:
+		array length of number of cols of fragments matrix where each is
+			labeled True/False wrt being real variants
+		site_mask to use to filter columns of fragments matrix
+		if return_vcfs, returns (true_variants, longshot_vcf, ground_truth_vcf)
+	'''
+	# load vcf from longshot run
+	ls_callset = allel.read_vcf(longshot_vcf_path)
+
+	# load ground truth vcf
+	callset = allel.read_vcf(ground_truth_vcf_path)
+
+	# find true variants
+	chr20_mask = callset['variants/CHROM'] == ls_callset['variants/CHROM'][0]
+	callset = mask_callset(callset, chr20_mask)
+
+	in_truth = np.in1d(ls_callset['variants/POS'], callset['variants/POS'])
+
+	# mask out regions not in .bed
+	in_bed_mask = get_bed_mask(giab_bed_path, ls_callset['variants/POS'])
+
+	# find where longshot predicts heterozygous
+	ls_01 = np.all(np.equal(ls_callset['calldata/GT'], [0,1]), axis=2).T[0]
+	ls_10 = np.all(np.equal(ls_callset['calldata/GT'], [1,0]), axis=2).T[0]
+	ls_hetero = ls_01 | ls_10
+
+	site_mask = in_bed_mask & ls_hetero
+
+	if return_vcfs:
+		return in_truth.astype(int)[site_mask], site_mask, ls_callset, callset
+	else:
+		return in_truth.astype(int)[site_mask], site_mask
+
+
+def mask_callset(callset, mask):
+	for key in list(callset):
+		if key == 'samples':
+			continue
+		callset[key] = callset[key][mask]
+
+	return callset
+
+
+def matrix_sparsity_info(allele_mat, print_info=False):
+	''' 
+	Get info about sparsity of allele/quality/incorrect read matrix by
+	rows and cols
+	'''
+
+	sample_reads = np.count_nonzero(~np.isnan(allele_mat), axis=1)
+	site_reads = np.count_nonzero(~np.isnan(allele_mat), axis=0)
+
+	if print_info:
+		nonzero_sites = np.count_nonzero(~np.isnan(allele_mat))
+
+		print("num elements not missing:\t{}".format(nonzero_sites))
+		print("percent matrix not missing:\t{:.3f}".format(
+			nonzero_sites / allele_mat.size
+		))
+
+		print("num fragments:\t{}".format(allele_mat.shape[0]))
+		print("num sites:\t{}".format(allele_mat.shape[1]))
+
+		print("\nfragments:")
+		val = np.mean(sample_reads)
+		print("\tmean reads:\t{:.1f}\t{:.3f}".format(val, val / allele_mat.shape[1]))
+		val = np.median(sample_reads)
+		print("\tmedian reads:\t{}\t{:.3f}".format(val, val / allele_mat.shape[1]))
+		val = np.max(sample_reads)
+		print("\tmax reads:\t{}\t{:.3f}".format(val, val / allele_mat.shape[1]))
+		val = np.min(sample_reads)
+		print("\tmin reads:\t{}\t{:.3f}".format(val, val / allele_mat.shape[1]))
+		
+		print("\nsites:")
+		val = np.mean(site_reads)
+		print("\tmean reads:\t{:.1f}\t{:.3f}".format(val, val / allele_mat.shape[0]))
+		val = np.median(site_reads)
+		print("\tmedian reads:\t{}\t{:.3f}".format(val, val / allele_mat.shape[0]))
+		val = np.max(site_reads)
+		print("\tmax reads:\t{}\t{:.3f}".format(val, val / allele_mat.shape[0]))
+		val = np.min(site_reads)
+		print("\tmin reads:\t{}\t{:.3f}".format(val, val / allele_mat.shape[0]))
+
+	return sample_reads, site_reads
+
+
+def save_preprocessed(path, fragments, qualities, variant_labels):
+	np.savez(
+		path, 
+		fragments=fragments,
+		qualities=qualities,
+		variant_labels=variant_labels)
+
+
+def load_preprocessed(path):
+	''' Returns (fragments, qualities, variant_labels) from .npz '''
+	data = np.load(path)
+	return data['fragments'], data['qualities'], data['variant_labels']
+
+
+def encode_genotype(gt):
+	'''
+	Encode genotype from giab vcf as int:
+		0 if 0/0
+		1 if 0/1
+		2 if 1/1
+		-1 if anything else
+	'''
+	if gt[0] == 0 and gt[1] == 0:
+		return 0
+	elif gt[0] == 1 and gt[1] == 1:
+		return 2
+	elif (gt[0] == 0 and gt[1] == 1) or (gt[0] == 1 and gt[1] == 0):
+		return 1
+	else:
+		return -1
+
+
+def load_data(fragments_path, longshot_vcf_path, ground_truth_vcf_path,
+				giab_bed_path, save_path=None, return_full_frag_mats=False):
+	''' 
+	Load data from fragments.txt & 2.0.realigned_genotypes.vcf files
+	generated by Longshot and the GIAB ground truth vcf and bed files
+
+	Args:
+		fragments_path: path to fragments.txt
+		longshot_vcf_path: path to 2.0.realigned_genotypes.vcf
+		ground_truth_vcf_path: path to something like 
+			HG002_GRCh38_1_22_v4.1_draft_benchmark.vcf
+		giab_bed_path: path to something like HG002_..._benchmark.bed
+		save_path: location to save a file in a directory that already 
+			exists
+		return_full_frag_mats: if True, returns unmasked fragments and
+			qualities matrices in addition to masked versions usually 
+			returned
+
+	Returns:
+		(site_data, fragments, qualities) or if return_full_frag_mats:
+		(site_data, fragments, qualities, fragments_unmasked, 
+			qualities_unmasked)
+
+		site_data: DataFrame with info for all sites HMM predicts are
+			heterozygous
+		fragments: fragments matrix as returned by read_fragments masked
+			to sites HMM predicts are heterozygous
+		qualities: qualities matrix as returned by read_fragments masked
+			to sites HMM predicts are heterozygous
+		fragments_unmasked: fragments matrix as returned by read_fragments
+		qualities_unmasked: qualities matrix as returned by read_fragments		
+	'''
+	# load vcf from longshot run
+	ls_callset = allel.read_vcf(longshot_vcf_path)
+
+	# find where longshot hmm predicts heterozygous
+	ls_01 = np.all(np.equal(ls_callset['calldata/GT'], [0,1]), axis=2).T[0]
+	ls_10 = np.all(np.equal(ls_callset['calldata/GT'], [1,0]), axis=2).T[0]
+	ls_hetero = ls_01 | ls_10
+	hetero_site_inds = np.where(ls_hetero)[0]
+
+	ls_callset = mask_callset(ls_callset, ls_hetero)
+
+	# binary if site in .bed region (and therefore there will be ground truth)
+	in_bed_mask = get_bed_mask(giab_bed_path, ls_callset['variants/POS']).astype(int)
+
+	# load ground truth vcf
+	giab_callset = allel.read_vcf(ground_truth_vcf_path)
+
+	# mask GIAB vcf to correct chromesome and make DataFrame rep
+	chr_mask = giab_callset['variants/CHROM'] == ls_callset['variants/CHROM'][0]
+	giab_callset = mask_callset(giab_callset, chr_mask)
+
+	giab_df = pd.DataFrame(
+		np.vstack((
+			giab_callset['variants/CHROM'],
+			giab_callset['variants/POS'],
+			giab_callset['variants/REF'],
+			[','.join(giab_callset['variants/ALT'][i]) for i in range(
+					giab_callset['variants/ALT'].shape[0])],
+			[encode_genotype(gt[0]) for gt in giab_callset['calldata/GT']] 
+		)).T,
+		columns=['chrom', 'pos', 'ref', 'alt', 'genotype']
+	)
+
+	df = pd.DataFrame(
+		np.array((
+			hetero_site_inds, 
+			in_bed_mask, 
+			ls_callset['variants/CHROM'],
+			ls_callset['variants/POS'])).T,
+		columns=['site_ind', 'in_bed', 'chrom', 'pos']
+	)
+
+	df = pd.merge(df, giab_df, how='left', on=['chrom', 'pos'])
+
+	# fill for genotype=0 sites in bed but not var sites
+	df.loc[df.in_bed == 1, 'genotype'] = df.loc[df.in_bed == 1]['genotype'].fillna(0)
+
+	# save
+	if save_path:
+		df.to_csv(save_path, na_rep='', sep='\t', index=False)
+
+	# load read fragments and their qualities
+	_, fragments, qualities = read_fragments(fragments_path)
+
+	if return_full_frag_mats:
+		return (df, fragments[:, df.site_ind.astype(int)], 
+				qualities[:, df.site_ind.astype(int)], fragments, qualities)
+	else:
+		return (df, fragments[:, df.site_ind.astype(int)], 
+				qualities[:, df.site_ind.astype(int)])
+
+
+def load_full_data(fragments_path, longshot_vcf_path, ground_truth_vcf_path,
+					giab_bed_path, save_path=None):
+	''' 
+	Load data from fragments.txt & 2.0.realigned_genotypes.vcf files
+	generated by Longshot and the GIAB ground truth vcf and bed files.
+	Does not mask data to Longshot predicted heterozygous sites as 
+	load_data does.
+
+	Args:
+		fragments_path: path to fragments.txt
+		longshot_vcf_path: path to 2.0.realigned_genotypes.vcf
+		ground_truth_vcf_path: path to something like 
+			HG002_GRCh38_1_22_v4.1_draft_benchmark.vcf
+		giab_bed_path: path to something like HG002_..._benchmark.bed
+		save_path: location to save a file in a directory that already 
+			exists
+
+	Returns:
+		site_data, fragments, qualities
+
+		site_data: DataFrame with info for all sites in fragments matrix
+		fragments: fragments matrix as returned by read_fragments
+		qualities: qualities matrix as returned by read_fragments	
+	'''
+	# load vcf from longshot run
+	ls_callset = allel.read_vcf(longshot_vcf_path)
+
+	# longshot hmm predictions
+	ls_01 = np.all(np.equal(ls_callset['calldata/GT'], [0,1]), axis=2).T[0]
+	ls_10 = np.all(np.equal(ls_callset['calldata/GT'], [1,0]), axis=2).T[0]
+	ls_hetero = ls_01 | ls_10
+	ls_11 = np.all(np.equal(ls_callset['calldata/GT'], [1,1]), axis=2).T[0]
+
+	ls_gt = np.zeros(ls_callset['variants/POS'].shape[0]).astype(int)
+	ls_gt[ls_hetero] = 1
+	ls_gt[ls_11] = 2
+
+	# binary if site in .bed region (and therefore there will be ground truth)
+	in_bed_mask = get_bed_mask(giab_bed_path, ls_callset['variants/POS']).astype(int)
+
+	# load ground truth vcf
+	giab_callset = allel.read_vcf(ground_truth_vcf_path)
+
+	# mask GIAB vcf to correct chromesome and make DataFrame rep
+	chr_mask = giab_callset['variants/CHROM'] == ls_callset['variants/CHROM'][0]
+	giab_callset = mask_callset(giab_callset, chr_mask)
+
+	giab_df = pd.DataFrame(
+		np.vstack((
+			giab_callset['variants/CHROM'],
+			giab_callset['variants/POS'],
+			giab_callset['variants/REF'],
+			[','.join(giab_callset['variants/ALT'][i]) for i in range(
+					giab_callset['variants/ALT'].shape[0])],
+			[encode_genotype(gt[0]) for gt in giab_callset['calldata/GT']]
+		)).T,
+		columns=['chrom', 'pos', 'ref', 'alt', 'genotype']
+	)
+
+	df = pd.DataFrame(
+		np.array((
+			range(ls_callset['variants/POS'].shape[0]), 
+			in_bed_mask, 
+			ls_callset['variants/CHROM'],
+			ls_callset['variants/POS'],
+			ls_gt
+		)).T,
+		columns=[
+			'site_ind', 'in_bed', 'chrom', 'pos',
+			'ls_hmm_pred_genotype'
+		]
+	)
+
+	df = pd.merge(df, giab_df, how='left', on=['chrom', 'pos'])
+
+	# fill for genotype=0 sites in bed but not var sites
+	df.loc[df.in_bed == 1, 'genotype'] = df.loc[df.in_bed == 1]['genotype'].fillna(0)
+
+	# save
+	if save_path:
+		df.to_csv(save_path, na_rep='', sep='\t', index=False)
+
+	# load read fragments and their qualities
+	_, fragments, qualities = read_fragments(fragments_path)
+
+	return df, fragments, qualities
+	
+
+def load_longshot_data(fragments_path, longshot_vcf_path, 
+						return_vcf=False):
+	''' 
+	Load data from fragments.txt & 2.0.realigned_genotypes.vcf files
+	generated by Longshot.
+
+	Args:
+		fragments_path: path to fragments.txt
+		longshot_vcf_path: path to 2.0.realigned_genotypes.vcf
+		return_vcf: also returns longshot_vcf_path data dict as read
+			by scikit-allel when True
+
+	Returns:
+		site_data, fragments, qualities, vcf_dict(opt)
+
+		site_data: DataFrame with info for all sites HMM predicts are
+			heterozygous
+		fragments: fragments matrix as returned by read_fragments, possibly
+			masked
+		qualities: qualities matrix as returned by read_fragments, possibly
+			masked
+		vcf_dict: longshot_vcf_path data dict as read by scikit-allel
+	'''
+	# load vcf from longshot run
+	ls_callset = allel.read_vcf(longshot_vcf_path)
+
+	# find where longshot hmm predicts heterozygous
+	ls_01 = np.all(np.equal(ls_callset['calldata/GT'], [0,1]), axis=2).T[0]
+	ls_10 = np.all(np.equal(ls_callset['calldata/GT'], [1,0]), axis=2).T[0]
+	ls_hetero = ls_01 | ls_10
+
+	df = pd.DataFrame(
+		np.array((
+			range(ls_callset['variants/POS'].shape[0]),
+			ls_callset['variants/CHROM'],
+			ls_callset['variants/POS'],
+			ls_hetero.astype(int)
+		)).T,
+		columns=['site_ind', 'chrom', 'pos', 'hmm_pred_hetero']
+	)
+
+	# load read fragments and their qualities
+	_, fragments, qualities = read_fragments(fragments_path)
+
+	if return_vcf:
+		return df, fragments, qualities, ls_callset
+	else:
+		return df, fragments, qualities
+
+
+if __name__ == '__main__':
+	fragments_path='data/fragments/chr20_1-1M/fragments.txt'
+	longshot_vcf_path='data/fragments/chr20_1-1M/2.0.realigned_genotypes.vcf'
+	ground_truth_vcf_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.vcf'
+	giab_bed_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.bed'
+	site_data_save_path='data/preprocessed/1M_site_data.tsv'
+
+	# df, fragments, qualities, ff, _ = load_data(
+	# 	fragments_path, 
+	# 	longshot_vcf_path, 
+	# 	ground_truth_vcf_path,
+	# 	giab_bed_path, 
+	# 	save_path=site_data_save_path)
+
+	# df, fragments, qualities = load_longshot_data(fragments_path, longshot_vcf_path)
+
+	df, fragments, qualities = load_full_data(fragments_path, longshot_vcf_path, ground_truth_vcf_path,
+				giab_bed_path)
