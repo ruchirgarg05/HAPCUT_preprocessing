@@ -5,7 +5,7 @@ import pandas as pd
 from sim_util import cluster_fragments, generate_matrix_for_visualization
 
 
-def get_probability_fragments_from_same_fragment(reads, st_ens, index, quality):
+def get_probability_fragments_from_same_fragment(reads, st_ens, index):
     """
     Return a tuple of probabilities of 
      - read1 and read2 coming from the same Haplotype fragment
@@ -16,46 +16,35 @@ def get_probability_fragments_from_same_fragment(reads, st_ens, index, quality):
     param error_rate: quality of the reads
     """
     assert len(reads) == len(st_ens) == 2
-    # (11, 15)
-    # (12, 14)
-    # (12, 14)
-    #import pdb;pdb.set_trace()
+    
+    #import ipdb;ipdb.set_trace()
     st, en = max(st_ens[0][0], st_ens[1][0]), min(st_ens[0][1], st_ens[1][1])
     # Length of the overlapping part of the two reads.
     len_common = en - st
     r0_index_st, r1_index_st = st - st_ens[0][0], st - st_ens[1][0]
+    
     r0_index_en, r1_index_en = r0_index_st + len_common, r1_index_st + len_common
+    
     idx = None if index is None else index-st    
-    read0, read1 = reads[0][r0_index_st: r0_index_en], reads[1][r1_index_st: r1_index_en]
+    
+    read0, read1 = reads[0][0][r0_index_st: r0_index_en], reads[1][0][r1_index_st: r1_index_en]
+    qual0, qual1 = reads[0][1][r0_index_st:r0_index_en], reads[1][1][r1_index_st: r1_index_en]
             
     same, diff = 1., 1.
     
-    for i, (v0, v1, q) in enumerate(zip(read0, read1, quality[st:en])):
-        if i == idx:
+    for i, (v0, v1, q1, q2) in enumerate(zip(read0, read1, qual0, qual1)):
+        if i == idx or v0==-1. or v1==-1.:
             continue
         if v0 == v1:
-            same *= (1 - q)
-            diff *= q
+            same *= ((1 - q1) * (1-q2) + q1*q2 ) 
+            diff *= ((1-q1)*q2         + (1-q2)*q1)
         else:
             # v0 and v1 are not same
-            same *= q
-            diff *= (1- q)
+            diff *= ((1 - q1) * (1-q2) + q1*q2 ) 
+            same *= ((1-q1)*q2         + (1-q2)*q1)
+            
     sum_prob = same + diff
     same, diff = same/sum_prob, diff/sum_prob  
-    
-    
-    # for i, (v0, v1) in enumerate(zip(read0, read1)):
-    #     if i == idx:
-    #         continue
-    #     if v0 == v1:
-    #         same *= (1 - error_rate)
-    #         diff *= error_rate
-    #     else:
-    #         # v0 and v1 are not same
-    #         same *= error_rate
-    #         diff *= (1- error_rate)
-    # sum_prob = same + diff
-    # same, diff = same/sum_prob, diff/sum_prob  
     return same, diff
 
 
@@ -69,13 +58,13 @@ def get_overlapping_fragments_for_variants_sites(reads, st_ens, index):
     for read, st_en in zip(reads, st_ens):
         if st_en[0] > index:
             break
-        if index>=st_en[0] and index<st_en[1]:
+        if index>=st_en[0] and index<st_en[1] and read[0][index - st_en[0]] != -1.:            
             overalapping_frags.append(read)
             overlapping_st_ens.append(st_en)
     return overalapping_frags, overlapping_st_ens
 
 
-def get_likelihood_heterozygous_genotype(reads, st_en, index, qual):
+def get_likelihood_heterozygous_genotype(reads, st_en, index):
     """
     Return the likelihood of the site at index being a heterozygous genotype, for the reads 
     - coming from same Haplotype,
@@ -86,25 +75,29 @@ def get_likelihood_heterozygous_genotype(reads, st_en, index, qual):
     assert index>=max(st_en[0][0], st_en[1][0]) and index<=min(st_en[0][1], st_en[1][1])
     index0, index1 = index - st_en[0][0], index - st_en[1][0]
     try:
-        assert index0 < len(reads[0]) and index1<len(reads[1])
+        assert index0 < len(reads[0][0]) and index1<len(reads[1][0])
     except:
-        import ipdb;ipdb.set_trace()    
-    if reads[0][index0] == reads[1][index1]:
+        import ipdb;ipdb.set_trace()
+    
+    frag0, frag1 = reads[0][0][index0], reads[1][0][index1]
+    qual0, qual1 = reads[0][1][index0], reads[1][1][index1]
+    
+    if frag0 == frag1:
         # Same value at the site
-        likelihood_same = ((1-qual)*(1-qual))/2 + (qual*qual)/2
-        likelihood_diff = qual * (1 - qual)
+        likelihood_same = ((1-qual0)*(1-qual1))/2 + (qual0*qual1)/2
+        likelihood_diff = (qual0 * (1 - qual1) + qual1*(1-qual0))/2
     else:
         # Different values at the given site
-        likelihood_same = qual * (1 - qual)
-        likelihood_diff = ((1-qual)*(1-qual))/2 + (qual*qual)/2
+        likelihood_diff = ((1-qual0)*(1-qual1))/2 + (qual0*qual1)/2
+        likelihood_same = (qual0 * (1 - qual1) + qual1*(1-qual0))/2
     # normalize the likelihood, as likelihood_same and likelihood_diff 
-    # do not add upto 1.            
+    # do not add upto 1.       
         
     sum_likelihood = likelihood_same + likelihood_diff   
     return likelihood_same/ sum_likelihood, likelihood_diff/ sum_likelihood
 
 
-def calculate_likelihood_of_heterozygous_site(reads, st_en, index, quality, ref_H_len, false_variant_locs=None):
+def calculate_likelihood_of_heterozygous_site(reads, st_en, index):
     """
     Given the reads what is the likelihood of allele lying at index being 
     a heterozygous genotype.
@@ -127,16 +120,25 @@ def calculate_likelihood_of_heterozygous_site(reads, st_en, index, quality, ref_
     
     #ipdb.set_trace()
     frag_0 = (overlapping_reads[0], overlapping_st_en[0])
-    qual = quality[index]
-    likelihood_per_reads = [(1-qual, qual) if overlapping_reads[0][0] == 0 else (qual, 1-qual)]
+    # Get the idx of relative to the read for `index`. 
+    idx = index - frag_0[1][0]
+    fragv = overlapping_reads[0][0][idx]
+    qual = overlapping_reads[0][1][idx]
+    
+    #likelihood_per_reads = [(1-qual, qual) if frag[0] == 0 else (qual, 1-qual)]
+    
+    likelihood_per_reads = [(1-qual, qual) if fragv == 0 else (qual, 1-qual)]
     
     for i in range(1, num_frags):
         frag_1 = (overlapping_reads[i], overlapping_st_en[i])
-        r, s_e = [frag_0[0], frag_1[0]],  [frag_0[1], frag_1[1]]
         
+        r, s_e = [frag_0[0], frag_1[0]],  [frag_0[1], frag_1[1]]       
         
-        prob_same, prob_diff = get_probability_fragments_from_same_fragment(r, s_e, index, quality)            
-        same_lik, diff_lik = get_likelihood_heterozygous_genotype(r, s_e, index, qual)
+        prob_same, prob_diff = get_probability_fragments_from_same_fragment(r, s_e, index)            
+        same_lik, diff_lik = get_likelihood_heterozygous_genotype(r, s_e, index)
+        
+        # prob_same, prob_diff = get_probability_fragments_from_same_fragment(r, s_e, index, quality)            
+        # same_lik, diff_lik = get_likelihood_heterozygous_genotype(r, s_e, index, qual)
                
         l1_prev, l2_prev = likelihood_per_reads[-1]
         
@@ -160,12 +162,18 @@ def remove_site_from_samples(samples, st_en, index):
     """
     reads, st_en = cluster_fragments(samples, st_en)
     nreads = []
+    cnt_0, cnt_1 = 0, 0
     for r, s_e in zip(reads, st_en):
         if index>=s_e[0] and index<s_e[1]:
             idx = index - s_e[0]
-            r[idx] = -1        
+            if r[0][idx] == 1:
+                cnt_1 += 1
+            elif r[0][idx] == 0:
+                cnt_0 += 1    
+            r[0][idx] = -1.        
         nreads.append(r)
-    return nreads, st_en
+    val = 1 if cnt_1 > cnt_0 else 0    
+    return nreads, st_en, val
 
 
 def get_likelihood_without_haplotype_information(reads, st_en, ref_H_len):
@@ -177,18 +185,15 @@ def get_likelihood_without_haplotype_information(reads, st_en, ref_H_len):
     return likelihoods
 
 
-def remove_false_variants(reads, st_en, qual, ref_H_len):
+def remove_false_variants(reads, st_en, ref_H_len):
     """
     Removes the sites which has less likelihood of it being heterozygous.
-    """
-    #import ipdb;ipdb.set_trace()        
-    if not hasattr(qual, "__len__"):
-        qual = [qual]*ref_H_len
-        
-    assert len(qual) == ref_H_len
-       
-    false_variants = set()
     
+    reads has fragment value, along with the 
+    """
+    import ipdb;ipdb.set_trace()
+    
+    false_variants = {}  
     while True:
         # Keep running the algorithm till there is no false variants found. 
         
@@ -196,11 +201,14 @@ def remove_false_variants(reads, st_en, qual, ref_H_len):
         likelihood_false_variants = []
         false_variant_locs = []
         
+        
         likelihood_no_hap_info = get_likelihood_without_haplotype_information(reads, st_en, ref_H_len)
-              
         for i in range(ref_H_len):
+            if (not i % 50):
+                print(f"processed first {i} variant sites")
+                #print(likelihood_false_variants[:-20])
             if i not in false_variant_locs:
-                likelihood_false_variants.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i, qual, ref_H_len), i))
+                likelihood_false_variants.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i), i))
             else:
                 # not really a variant anymore, nothing to do.add()
                 # simply add np.nan to the list
@@ -215,27 +223,30 @@ def remove_false_variants(reads, st_en, qual, ref_H_len):
                 and idx not in false_variants):
                 false_variant_locs.append(idx)
         
-        print(f"False variant locations are {false_variant_locs}")
+        # print(f"False variant locations are {false_variant_locs}")
         
+    
         if not len(false_variant_locs):
             break
-         
+        
+        
         #generate_matrix_for_visualization(ref_H,#[np.array([list(range(ref_H_len)), list(range(ref_H_len))])], 
-         #                                 [], reads, st_en) 
+        #                                 [], reads, st_en) 
         for idx in false_variant_locs:
-            import ipdb;ipdb.set_trace()
+            #import ipdb;ipdb.set_trace()
             # TODO: Remove all the false variants together.
-            false_variants.add(idx)
-            reads, st_en = remove_site_from_samples(reads, st_en, idx)
+            reads, st_en, val = remove_site_from_samples(reads, st_en, idx)
+            false_variants[idx] = val
             # TODO: Find the variant indexes whose likelihood might be affected after the deletion of this variant. 
             # Optimization: Remove if any false variant lies in this range from the list `false_variant_locs`.
             # Optimization1: (Speed) For the next optimization only recalculate for the above range.
             # To brute force the above simply uncomment the below break.
-            #break 
+            # break 
             
-            
+        break    
         # generate_matrix_for_visualization(ref_H,#[np.array([list(range(ref_H_len)), list(range(ref_H_len))])], 
         #                                   [], reads, st_en)
         # false_variants += false_variant_locs    
-    print(false_variants)        
+    #print(false_variant_locs)
+    return reads, st_en, false_variants
     return reads, st_en, false_variants

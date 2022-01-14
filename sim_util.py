@@ -1,5 +1,6 @@
 # imports
 import math
+from statistics import quantiles
 import numpy as np
 import pandas as pd
 import os
@@ -84,19 +85,25 @@ def print_false_variants_and_ref_H(ref_H, false_variant_locs):
                        index=["H1", "H2"]).to_string())        
 
         
-def compress_fragments(fragments):
+def compress_fragments(fragments, qualities):
   """
   Get a matrix of 0, 1, np.nan for each read. 
   We need to return st, en and the fragment
   """
   #import ipdb;ipdb.set_trace()
   reads, st_en = [], []
-  for frag in fragments:
+  qualities = np.power(10, -0.1*qualities)
+  
+  assert fragments.shape == qualities.shape
+  fragments = np.nan_to_num(fragments, nan=-1.)
+  
+  for frag, qual in zip(fragments, qualities):
     ones = np.where(frag==1.)[0]
     zeros = np.where(frag==0.)[0]
     if not len(ones) and not len(zeros):
       # no valid values in the fragment. 
       continue
+    
     if len(ones):
       s = min(ones)
       e = max(ones)
@@ -112,18 +119,19 @@ def compress_fragments(fragments):
           e = max(e, max(ones))
             
     # Each fragment either has 0, or 1 or
-    reads.append(frag[s:e+1])
+    reads.append((frag[s:e+1], qual[s:e+1]))
     st_en.append((s, e+1))
   return reads, st_en
        
 def generate_matrix_for_visualization(ref_H, false_variant_locs, 
                                       hap_samples, st_en):
+    import ipdb;ipdb.set_trace()
     reference_length = len(ref_H[0]) 
     print_false_variants_and_ref_H(ref_H, false_variant_locs)
     
     matrix = [["-" for _ in range(reference_length)] for _ in range(len(hap_samples))]
     for idx, ( (s,e),  sa ) in enumerate(zip(st_en, hap_samples)):
-        for i, v in zip(range(s, e), sa):
+        for i, v in zip(range(s, e), sa[0]):
             if v != -1:
                 matrix[idx][i] = str(int(v))
     
