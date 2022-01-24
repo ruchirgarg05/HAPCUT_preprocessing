@@ -22,9 +22,17 @@ def test_false_vars_locs(ref_length=30, coverage=6, read_length=5, std_read_leng
     
 def test_real_data():
     import allel
-    
     fragments_path='data/fragments/chr20_1-500K/fragments.txt'
     longshot_vcf_path='data/fragments/chr20_1-500K/2.0.realigned_genotypes.vcf'
+    ground_truth_vcf_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.vcf'
+    giab_bed_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.bed'
+    from sim_util import *
+    from utils import *
+    from preprocess_utils import *
+    reads, st_en = cluster_fragments(compress_fragments(fragments, quals))
+    false_vars = remove_false_variants(reads, st_en, len(fragments[0]))
+
+
     ls_callset = allel.read_vcf(longshot_vcf_path)
     ls_01 = np.all(np.equal(ls_callset['calldata/GT'], [0,1]), axis=2).T[0]
     ls_10 = np.all(np.equal(ls_callset['calldata/GT'], [1,0]), axis=2).T[0]
@@ -34,6 +42,7 @@ def test_real_data():
     #quals = np.power(10, -0.1*qualities)
     fr1, qual1 = fragments[ls_het], qualities[ls_het]
     reads, st_en = compress_fragments(fr1, qual1)
+    reads, st_en = cluster_fragments()
     
     _, __, false_variants = remove_false_variants(reads, st_en, len(fr1[0]))
     

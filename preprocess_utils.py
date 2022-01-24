@@ -185,13 +185,13 @@ def get_likelihood_without_haplotype_information(reads, st_en, ref_H_len):
     return likelihoods
 
 
-def remove_false_variants(reads, st_en, ref_H_len):
+def remove_false_variants(reads, st_en, ref_H_len, logging=False):
     """
     Removes the sites which has less likelihood of it being heterozygous.
     
     reads has fragment value, along with the 
     """
-    import ipdb;ipdb.set_trace()
+    #import ipdb;ipdb.set_trace()
     
     false_variants = {}  
     while True:
@@ -204,7 +204,7 @@ def remove_false_variants(reads, st_en, ref_H_len):
         
         likelihood_no_hap_info = get_likelihood_without_haplotype_information(reads, st_en, ref_H_len)
         for i in range(ref_H_len):
-            if (not i % 50):
+            if logging and (not i % 50):
                 print(f"processed first {i} variant sites")
                 #print(likelihood_false_variants[:-20])
             if i not in false_variant_locs:
@@ -221,7 +221,9 @@ def remove_false_variants(reads, st_en, ref_H_len):
             if (likelihood < likelihood_no_hap_info[idx] 
                 and likelihood is not np.nan 
                 and idx not in false_variants):
-                false_variant_locs.append(idx)
+                confid = likelihood_no_hap_info[idx] / likelihood
+                coverage = -1*np.log(likelihood_no_hap_info[idx]) / np.log(2)
+                false_variant_locs.append((idx,  (confid, coverage ) ))
         
         # print(f"False variant locations are {false_variant_locs}")
         
@@ -232,11 +234,11 @@ def remove_false_variants(reads, st_en, ref_H_len):
         
         #generate_matrix_for_visualization(ref_H,#[np.array([list(range(ref_H_len)), list(range(ref_H_len))])], 
         #                                 [], reads, st_en) 
-        for idx in false_variant_locs:
+        for idx, confid in false_variant_locs:
             #import ipdb;ipdb.set_trace()
             # TODO: Remove all the false variants together.
             reads, st_en, val = remove_site_from_samples(reads, st_en, idx)
-            false_variants[idx] = val
+            false_variants[idx] = (val, confid)
             # TODO: Find the variant indexes whose likelihood might be affected after the deletion of this variant. 
             # Optimization: Remove if any false variant lies in this range from the list `false_variant_locs`.
             # Optimization1: (Speed) For the next optimization only recalculate for the above range.
@@ -248,5 +250,4 @@ def remove_false_variants(reads, st_en, ref_H_len):
         #                                   [], reads, st_en)
         # false_variants += false_variant_locs    
     #print(false_variant_locs)
-    return reads, st_en, false_variants
     return reads, st_en, false_variants
