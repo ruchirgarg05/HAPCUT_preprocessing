@@ -26,10 +26,8 @@ def test_real_data():
     longshot_vcf_path='data/fragments/chr20_1-500K/2.0.realigned_genotypes.vcf'
     ground_truth_vcf_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.vcf'
     giab_bed_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.bed'
-    from sim_util import *
-    from utils import *
-    from preprocess_utils import *
-    reads, st_en = cluster_fragments(compress_fragments(fragments, quals))
+    a, fragments, quals = read_fragments(fragments_path)
+    reads, st_en = cluster_fragments(*compress_fragments(fragments, quals))
     false_vars = remove_false_variants(reads, st_en, len(fragments[0]))
 
 

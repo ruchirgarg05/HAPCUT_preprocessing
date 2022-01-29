@@ -4,7 +4,9 @@ from utils import *
 
 from copy import deepcopy
 
-def return_false_variant_prob(ref_length, coverage, read_length, std_read_length, false_variance_density):
+def return_false_variant_prob(ref_length = 300, coverage=20, read_length=10,
+                          std_read_length=2, false_variance_density=0.1):
+    #ref_length, coverage, read_length, std_read_length, false_variance_density):
     """
     Return false variance with:
      -
@@ -27,8 +29,10 @@ def return_false_variant_prob(ref_length, coverage, read_length, std_read_length
     _, __, false_vars = remove_false_variants(er_hap_samples, sts_ens, len(ref_H[0]))
     return false_variant_locs, false_vars
 
+
 def predicted_label_with_threshold(prob_false_variance, threshold=None):
     return prob_false_variance.keys()
+
 
 def get_accuracy_measures(ref_length = 300, coverage=20, read_length=10,
                           std_read_length=2, false_variance_density=0.1,
@@ -56,7 +60,7 @@ def get_precision_recall_over_num_iterations(num_iterations):
         precision, recall = get_accuracy_measures()
         precisions.append(precision)
         recalls.append(recall)
-    pmean, rmean = np.mean(np.array(precisions)), np.mean(np.array(recall))
+    pmean, rmean = np.mean(np.array(precisions)), np.mean(np.array(recalls))
     df = pd.DataFrame(index = range(len(precisions)))
     df["precision"] = precisions
     df["recall"] = recalls

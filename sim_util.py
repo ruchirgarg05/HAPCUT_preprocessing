@@ -125,8 +125,8 @@ def generate_miscall_error_rates_for(samples):
   Zips the samples with their corresponding miscaal error rates
   """
   error_samples = []
-  fragments_path='data/fragments/chr20_1-500K/fragments.txt'
-  longshot_vcf_path='data/fragments/chr20_1-500K/2.0.realigned_genotypes.vcf'
+  fragments_path='/home/ruchirgarg5/content/data/debug/fragments.txt'
+  longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.0.realigned_genotypes.vcf'
 
   freq = get_error_freq(fragments_path, longshot_vcf_path)
 

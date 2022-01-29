@@ -185,6 +185,35 @@ def get_likelihood_without_haplotype_information(reads, st_en, ref_H_len):
     return likelihoods
 
 
+
+def get_coverage_for_all_the_sites(reads, st_en, ref_H_len):
+    reads, st_en = cluster_fragments(reads, st_en)
+    coverages = []
+    for i in range(ref_H_len):
+        overlapping_reads = get_overlapping_fragments_for_variants_sites(reads, st_en, i)
+        coverages.append(len(overlapping_reads[0]))
+    return coverages    
+
+def get_likelihood_with_haplotype_information(reads, st_en, ref_H_len):
+    likelihood_heterozygous_sites = []
+    for i in range(ref_H_len):
+        likelihood_heterozygous_sites.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i), i))
+    return likelihood_heterozygous_sites
+
+def classifier(likelihood_heterozygous_sites, coverages, epsilon=0.):
+    false_variant_locs = []
+    likelihood_heterozygous_sites = sorted(likelihood_heterozygous_sites)
+    for likelihood, idx in likelihood_heterozygous_sites:
+            coverage = coverages[idx]
+            threshold_prob = (0.5 - epsilon)**coverages[idx]
+            if (likelihood <  threshold_prob
+                and likelihood is not np.nan):
+                confid = threshold_prob / likelihood
+                false_variant_locs.append((idx,  (confid, coverage ) ))
+    return false_variant_locs
+
+
+
 def remove_false_variants(reads, st_en, ref_H_len, logging=False):
     """
     Removes the sites which has less likelihood of it being heterozygous.
