@@ -233,7 +233,7 @@ def remove_false_variants(reads, st_en, ref_H_len, logging=False):
         
         likelihood_no_hap_info = get_likelihood_without_haplotype_information(reads, st_en, ref_H_len)
         for i in range(ref_H_len):
-            if logging and (not i % 50):
+            if logging and (not i % 200):
                 print(f"processed first {i} variant sites")
                 #print(likelihood_false_variants[:-20])
             if i not in false_variant_locs:

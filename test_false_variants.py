@@ -22,27 +22,44 @@ def test_false_vars_locs(ref_length=30, coverage=6, read_length=5, std_read_leng
     
 def test_real_data():
     import allel
-    fragments_path='data/fragments/chr20_1-500K/fragments.txt'
-    longshot_vcf_path='data/fragments/chr20_1-500K/2.0.realigned_genotypes.vcf'
-    ground_truth_vcf_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.vcf'
-    giab_bed_path='data/GIAB/HG002_GRCh38_1_22_v4.1_draft_benchmark.bed'
+    fragments_path='/home/ruchirgarg5/content/data/debug/fragments.txt'
+    longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.0.realigned_genotypes.vcf'
+    pre_processed_longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.0.realigned_genotypes_preprocessed.vcf'
+    ground_truth_vcf_path='/home/ruchirgarg5/content/data/HG003_GRCh38_chr20_v4.2.1_benchmark.vcf.gz'
+    giab_bed_path='/home/ruchirgarg5/content/data/HG003_GRCh38_chr20_v4.2.1_benchmark_noinconsistent.bed'
     a, fragments, quals = read_fragments(fragments_path)
-    reads, st_en = cluster_fragments(*compress_fragments(fragments, quals))
-    false_vars = remove_false_variants(reads, st_en, len(fragments[0]))
-
-
     ls_callset = allel.read_vcf(longshot_vcf_path)
     ls_01 = np.all(np.equal(ls_callset['calldata/GT'], [0,1]), axis=2).T[0]
     ls_10 = np.all(np.equal(ls_callset['calldata/GT'], [1,0]), axis=2).T[0]
     ls_het = ls_01 | ls_10
+    quals_het, fragments_het, ls_callset_hetero = quals[:, ls_het], fragments[:, ls_het], ls_callset["calldata/GT"][ls_het]
+    reads, st_en = cluster_fragments(*compress_fragments(fragments_het, quals_het))
+
+    _, __, false_vars = remove_false_variants(reads, st_en, len(fragments_het[0]))
+    for idx, data in false_vars.items():
+        genotype = data[0]
+        confid, coverage = data[1][0], data[1][1]
+        if coverage>10 and confid>100:
+            ls_callset_hetero[idx] = np.array([[genotype, genotype]])
+
+    ls_callset["calldata/GT"][ls_het] = ls_callset_hetero
+    allel.write_vcf(pre_processed_longshot_vcf_path, ls_callset)
+
+
+     # coverages = get_coverage_for_all_the_sites(reads, st_en, len(fragments_het[0]))
+    # het_likelihood = get_likelihood_with_haplotype_information(reads, st_en, len(fragments_het[0]))
+    # epsilon = 0.04
+    # false_variants = dict(classifier(het_likelihood, coverages, epsilon))
+    # false_variants_locs = list(false_variants.keys())
     
-    _, fragments, qualities = read_fragments(fragments_path)
-    #quals = np.power(10, -0.1*qualities)
-    fr1, qual1 = fragments[ls_het], qualities[ls_het]
-    reads, st_en = compress_fragments(fr1, qual1)
-    reads, st_en = cluster_fragments()
     
-    _, __, false_variants = remove_false_variants(reads, st_en, len(fr1[0]))
+    # _, fragments, qualities = read_fragments(fragments_path)
+    # #quals = np.power(10, -0.1*qualities)
+    # fr1, qual1 = fragments[ls_het], qualities[ls_het]
+    # reads, st_en = compress_fragments(fr1, qual1)
+    # reads, st_en = cluster_fragments()
+    
+    # _, __, false_variants = remove_false_variants(reads, st_en, len(fr1[0]))
     
     
     

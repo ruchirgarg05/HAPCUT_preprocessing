@@ -66,4 +66,60 @@ def get_precision_recall_over_num_iterations(num_iterations):
     df["recall"] = recalls
     print(df)
     return pmean, rmean
-    
+
+def test_real_data():
+    fragments_path='data/variantcalling/1_1M/fragments_1_2257.txt'
+    longshot_vcf_path='data/variantcalling/1_1M/2.0.realigned_genotypes_1_1M.vcf'
+    longshot_vcf_path_f='data/variantcalling/1_1M/2.1.realigned_genotypes_1_1M.vcf'
+    true_variants = "data/variantcalling/1_1M/chr20.GIAB_highconfidencecalls_1_1M.vcf"
+    high_confidence_bed = "data/variantcalling/1_1M/chr20.GIAB_highconfidenceregions_1_1M.bed"
+    _, fragments, quals = read_fragments(fragments_path)
+    callset = allel.read_vcf(longshot_vcf_path)
+    filter = callset["variants/FILTER_PASS"]
+    ls_01 = np.all(np.equal(callset['calldata/GT'], [0,1]), axis=2).T[0]
+    ls_10 = np.all(np.equal(callset['calldata/GT'], [1,0]), axis=2).T[0]
+    ls_hetero = ls_01 | ls_10
+    filter = filter & ls_hetero
+    fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
+    reads, st_en = cluster_fragments(*compress_fragments(fragments_filter, quals_filter))
+    fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
+    reads, st_en = cluster_fragments(*compress_fragments(fragments_filter, quals_filter))
+    reads, st_en, false_vars = remove_false_variants(reads, st_en, fragments_filter.shape[1], logging=True)
+    false_vars = dict(sorted(list(false_vars.items()), key= lambda v:(-1*v[1][1][0], -1*v[1][1][1])))
+
+    map_filter_index = []
+    mp = {}
+    cnt = 0
+    for i,  v in enumerate(filter):
+        if v:
+            mp[cnt] = i 
+            cnt += 1
+
+    loc_gt = {}
+    for k, v in false_vars.items():
+        index = mp[k]
+        gt = v[0]
+        loc_gt[index] = gt
+
+    with open(longshot_vcf_path_f, "r") as f:
+        lines = f.readlines()
+
+    dlines = []
+    hlines = []
+    for line in lines:
+        if line.startswith("chr20"):
+            dlines.append(line)
+        else:
+            hlines.append(line)
+
+    for idx, gt in loc_gt.items():
+        ld = dlines[idx].split("\t")
+        ld1 = f"{gt}/{gt}" + ld[-1][3:]
+        ld[-1] = ld1
+        dlines[idx] = "\t".join(ld)
+        
+    with open(longshot_vcf_path_f, "w") as f:
+        f.writelines(hlines)
+        f.writelines(dlines)    
+        
+        

@@ -148,6 +148,11 @@ def print_false_variants_and_ref_H(ref_H, false_variant_locs):
                        index=["H1", "H2"]).to_string())        
 
 
+def convert_qualities_to_error_rate(reads):
+  reads_er = []
+  for frag, qual in reads:
+    reads_er.append((frag, np.power(10, -0.1*qual)))
+  return reads_er  
 
 def compress_fragments(fragments, qualities):
   """
@@ -188,6 +193,7 @@ def compress_fragments(fragments, qualities):
   return reads, st_en
 
 def visualize_overlapping_reads_at(reads, st_en, index):
+    from preprocess_utils import get_overlapping_fragments_for_variants_sites
     reads, st_en = cluster_fragments(reads, st_en)
     reads, st_en = get_overlapping_fragments_for_variants_sites(reads, st_en, index)
     min_idx = min(st_en, key=lambda v: v[0])[0]
@@ -198,12 +204,14 @@ def visualize_overlapping_reads_at(reads, st_en, index):
         for i, v in zip(range(s, e), sa[0]):
             if v == 0 or v == 1:
                 matrix[idx][i] = str(int(v))
+
+    idx_index = index - min_idx
     with pd.option_context('display.max_rows', 100, 'display.max_columns', None):  # more options can be specified also
         offset = index - min_idx
-        st = max(offset - 5,  0)
-        en = min(offset + 5, max_idx - min_idx)
+        st = max(offset - 5,  0) # 17
+        en = min(offset + 5, max_idx - min_idx) # 27
         mat = np.array(matrix)[:, st:en]
-        import ipdb;ipdb.set_trace()
+        print(f"index corresponding to {index} is {idx_index}")
         df = pd.DataFrame( mat,
                            columns = [f"{i + st}" for i in range(en - st)], 
                            index=[f"f_{i}" for i in range(len(matrix))])
