@@ -1,14 +1,14 @@
-INPUT_DIR="/home/ruchirgarg5/content/data"
-OUTPUT_DIR="/home/ruchirgarg5/content/clair3_ont_demo"
-BASELINE_VCF_FILE_PATH="HG003_GRCh38_chr20_v4.2.1_benchmark.vcf.gz"
-BASELINE_BED_FILE_PATH="HG003_GRCh38_chr20_v4.2.1_benchmark_noinconsistent.bed"
+INPUT_DIR="/home/ruchirgarg5/content/HAPCUT_preprocessing/data/variantcalling/1_1M"
+OUTPUT_DIR="/home/ruchirgarg5/content/HAPCUT_preprocessing/data/variantcalling/1_1M"
+BASELINE_VCF_FILE_PATH="chr20.GIAB_highconfidencecalls_1_1M.vcf.gz"
+BASELINE_BED_FILE_PATH="chr20.GIAB_highconfidenceregions_1_1M.bed"
 #OUTPUT_VCF_FILE_PATH="pre_processed_2.0.realigned_genotypes_preprocessed.vcf.gz"
-OUTPUT_VCF_FILE_PATH="longshot_output.vcf.gz"
+OUTPUT_VCF_FILE_PATH="2.0.realigned_genotypes_1_1M.vcf"
 #OUTPUT_VCF_FILE_PATH="merge_output.vcf.gz"
 REF="GRCh38_no_alt_chr20.fa"
 CONTIGS="chr20"
-START_POS=100000
-END_POS=300000
+START_POS=1
+END_POS=1000000
 THREADS=4
 #source activate happy-env
 #conda install -c bioconda rtg-tools -y 

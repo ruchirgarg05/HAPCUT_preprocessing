@@ -1,27 +1,10 @@
 # imports
 import math
-from statistics import quantiles
 import numpy as np
 import pandas as pd
 import os
 import random
 import warnings
-import numpy as np
-import pandas as pd
-import scipy.stats as st
-import statsmodels.api as sm
-from scipy.stats._continuous_distns import _distn_names
-import warnings
-import numpy as np
-import pandas as pd
-import scipy.stats as st
-import statsmodels.api as sm
-from scipy.stats._continuous_distns import _distn_names
-import matplotlib
-import matplotlib.pyplot as plt
-
-matplotlib.rcParams['figure.figsize'] = (16.0, 12.0)
-matplotlib.style.use('ggplot')
 
 
 pd.set_option('display.max_columns', 40)
@@ -116,6 +99,12 @@ def get_error_freq(fragments_path, longshot_vcf_path, plot=False):
     values, counts = np.unique(quals1, return_counts=True)
     probs = counts / sum(counts)
     if plot:
+      import matplotlib
+      import matplotlib.pyplot as plt
+
+      matplotlib.rcParams['figure.figsize'] = (16.0, 12.0)
+      matplotlib.style.use('ggplot')
+
       plt.vlines(values, 0, probs, color='C0', )
     freq = np.asarray([values, probs]).T
     return freq    
@@ -193,6 +182,7 @@ def compress_fragments(fragments, qualities):
   return reads, st_en
 
 def visualize_overlapping_reads_at(reads, st_en, index):
+    import ipdb;ipdb.set_trace()
     from preprocess_utils import get_overlapping_fragments_for_variants_sites
     reads, st_en = cluster_fragments(reads, st_en)
     reads, st_en = get_overlapping_fragments_for_variants_sites(reads, st_en, index)
@@ -242,6 +232,9 @@ def generate_matrix_for_visualization(ref_H, false_variant_locs,
 # Create models from data
 def best_fit_distribution(data, bins=200, ax=None):
     """Model data by finding best fit distribution to data"""
+    import scipy.stats as st
+    import statsmodels.api as sm
+    from scipy.stats._continuous_distns import _distn_names
     # Get histogram of original data
     y, x = np.histogram(data, bins=bins, density=True)
     x = (x + np.roll(x, -1))[:-1] / 2.0

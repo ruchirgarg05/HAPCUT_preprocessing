@@ -1,7 +1,6 @@
 from sim_util import *
 from preprocess_utils import *
 from utils import *
-
 from copy import deepcopy
 
 def return_false_variant_prob(ref_length = 300, coverage=20, read_length=10,
@@ -67,12 +66,149 @@ def get_precision_recall_over_num_iterations(num_iterations):
     print(df)
     return pmean, rmean
 
-def test_real_data():
-    fragments_path='data/variantcalling/1_1M/fragments_1_2257.txt'
-    longshot_vcf_path='data/variantcalling/1_1M/2.0.realigned_genotypes_1_1M.vcf'
-    longshot_vcf_path_f='data/variantcalling/1_1M/2.1.realigned_genotypes_1_1M.vcf'
-    true_variants = "data/variantcalling/1_1M/chr20.GIAB_highconfidencecalls_1_1M.vcf"
-    high_confidence_bed = "data/variantcalling/1_1M/chr20.GIAB_highconfidenceregions_1_1M.bed"
+def get_genotypes_from_vcf(vcf_file, bed=None):
+    callset = allel.read_vcf(vcf_file)
+    filter = callset["variants/FILTER_PASS"]
+    if bed:
+        filter = filter & get_bed_mask(bed, callset["variants/POS"])
+    ls_01 = np.all(np.equal(callset['calldata/GT'], [0,1]), axis=2).T[0]
+    ls_10 = np.all(np.equal(callset['calldata/GT'], [1,0]), axis=2).T[0]
+    ls_00 = np.all(np.equal(callset['calldata/GT'], [0,0]), axis=2).T[0]
+    ls_11 = np.all(np.equal(callset['calldata/GT'], [1,1]), axis=2).T[0]
+    ls_hetero = ls_01 | ls_10
+    ls_homo = ls_00 | ls_11
+    filter_het = filter & ls_hetero
+    filter_homo = filter & ls_homo
+    hetero, homo = callset["variants/POS"][filter_het], callset["variants/POS"][filter_homo]
+    return set(hetero), set(homo)
+
+
+def benchmark(longshot_vcf_path = 'data/variantcalling/1M_2M/2.0.realigned_genotypes_1M_2M.vcf' , 
+             longshot_vcf_path_pre = 'data/variantcalling/1M_2M/2.1.realigned_genotypes_1M_2M.vcf', 
+             true_variants='data/variantcalling/1M_2M/chr20.GIAB_highconfidencecalls_1M_2M.vcf', 
+             high_confidence_bed='data/variantcalling/1M_2M/chr20.GIAB_highconfidenceregions_1M_2M.bed'):
+    import pandas as pd
+    input_het, input_homo = get_genotypes_from_vcf(longshot_vcf_path, high_confidence_bed)
+    output_het, output_homo = get_genotypes_from_vcf(longshot_vcf_path_pre, high_confidence_bed)
+    true_vals_het, true_vals_homo = get_genotypes_from_vcf(true_variants, high_confidence_bed)
+    
+    true_vals_pass = true_vals_het.union(true_vals_homo) 
+    input_pass = input_het.union(input_homo)
+  
+    # All the sites that are heterozygous that are present in true_vcf
+    inp_present_in_tv = true_vals_pass.intersection(input_het)
+
+    true_labels = true_vals_het.intersection(input_pass)
+    predicted_labels = input_het
+    true_positives = len(set(true_labels).intersection(predicted_labels))
+    false_positives = len(set(predicted_labels) - set(true_labels))
+    false_negatives = len(set(input_homo) .intersection( set(true_labels)))
+    input_precision = true_positives / (true_positives + false_positives)
+    input_recall = true_positives / (true_positives + false_negatives)
+    input_f1 = true_positives / (true_positives + 0.5*(false_positives + false_negatives))
+    input_fra_na = len(input_het - input_het.intersection(true_vals_pass)) /  len(input_het.intersection(true_vals_pass))
+    input_tot_comp = len(inp_present_in_tv)
+
+    predicted_labels = output_het
+    
+    out_present_in_tv = true_vals_pass.intersection(output_het)
+    true_positives = len(set(true_labels).intersection(predicted_labels))
+    false_positives = len(set(predicted_labels) - set(true_labels))
+    false_negatives = len(set(output_homo) .intersection( set(true_labels)))
+    #false_negatives = len(set(true_labels) - set(predicted_labels))
+    output_precision = true_positives / (true_positives + false_positives)
+    output_recall = true_positives / (true_positives + false_negatives)
+    output_f1 = true_positives / (true_positives + 0.5*(false_positives + false_negatives))
+    output_fra_na = len(output_het - output_het.intersection(true_vals_pass)) /  len(output_het.intersection(true_vals_pass))
+    output_tot_comp = len(out_present_in_tv)
+
+    matrix = [[input_tot_comp, input_precision, input_recall, input_f1, input_fra_na],
+               [output_tot_comp, output_precision, output_recall, output_f1, output_fra_na]]
+    df = pd.DataFrame( matrix,
+                           columns = ["tot_comparisons", "precision", "recall", "f1 score", "frac_na"], 
+                           index=["input", "pre_processed"])
+    print(df.to_string())
+    return df
+
+def get_index_for_fragment_path(frag_vcf, frag_file="data/variantcalling/fragments.txt", 
+                                full_vcf="data/variantcalling/2.0.realigned_genotypes.vcf"):
+    callset = allel.read_vcf(full_vcf)
+    POS = callset["variants/POS"]
+    callset_frag = allel.read_vcf(frag_vcf)
+    POS_fragment = callset_frag["variants/POS"]
+    index_st =  np.where(POS == POS_fragment[0])[0][0] + 1
+    index_en = index_st + POS_fragment.shape[0]
+    fn = filter_fragment_for_range(frag_file, index_st, index_en)
+    frag_file = "/".join(frag_vcf.split("/")[:-1]) + "/fragments.txt"
+    import ipdb;ipdb.set_trace()
+    os.rename(fn, frag_file)
+    _, frags, __ = read_fragments(frag_file)
+    assert frags.shape[1] == POS_fragment.shape[0]
+
+
+def script_create_data_fragments(s, e, create=False):
+    def run_cmd(cmd):
+        import os
+        os.system(cmd)
+        # import subprocess
+        # process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
+        # output, error = process.communicate()
+    
+    rng = f"{s}M_{e}M"
+    pdir = "data/variantcalling/"
+    dir_name = f'{pdir}{rng}'
+    cmds =[
+    f"mkdir {dir_name}",
+    f"tabix  -h {pdir}2.0.realigned_genotypes.vcf.gz chr20:{s},000,000-{e},000,000 > {dir_name}/2.0.realigned_genotypes_{rng}.vcf",
+    f"bgzip -c {dir_name}/2.0.realigned_genotypes_{rng}.vcf > {dir_name}/2.0.realigned_genotypes_{rng}.vcf.gz",
+    f"tabix  -p vcf {dir_name}/2.0.realigned_genotypes_{rng}.vcf.gz",
+
+    f"tabix  -h {pdir}chr20.GIAB_highconfidencecalls.vcf.gz chr20:{s},000,000-{e},000,000 > {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf",
+    f"bgzip -c {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf > {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf.gz",
+    f"tabix -p vcf {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf.gz",
+
+    f"tabix  -h {pdir}chr20.GIAB_highconfidenceregions.bed.gz chr20:{s},000,000-{e},000,000 > {dir_name}/chr20.GIAB_highconfidenceregions_{rng}.bed",
+    f"bgzip -c {dir_name}/chr20.GIAB_highconfidenceregions_{rng}.bed > {dir_name}/chr20.GIAB_highconfidenceregions_{rng}.bed.gz",
+    f"tabix -p bed {dir_name}/chr20.GIAB_highconfidenceregions_{rng}.bed.gz"]
+    if create:
+        for cmd in cmds:
+            run_cmd(cmd)
+    get_index_for_fragment_path(f'data/variantcalling/{rng}/2.0.realigned_genotypes_{rng}.vcf')
+    test_real_data(rng)
+
+def test_script_final_genotypes(s, e, create=False):
+    import ipdb;ipdb.set_trace()
+    def run_cmd(cmd):
+        import os
+        os.system(cmd)
+
+    rng = f"{s}M_{e}M"
+    pdir = "data/variantcalling/"
+    dir_name = f'{pdir}{rng}'
+    cmds =[
+    f"tabix  -h {pdir}4.0.final_genotypes.vcf.gz chr20:{s},000,000-{e},000,000 > {dir_name}/4.0.final_genotypes_{rng}.vcf",
+    f"bgzip -c {dir_name}/4.0.final_genotypes_{rng}.vcf > {dir_name}/4.0.final_genotypes_{rng}.vcf.gz",
+    f"tabix  -p vcf {dir_name}/4.0.final_genotypes_{rng}.vcf.gz",
+    ]
+    if create:
+        for cmd in cmds:
+            run_cmd(cmd)
+
+    benchmark_df = benchmark(longshot_vcf_path = f'data/variantcalling/{rng}/4.0.realigned_genotypes_{rng}.vcf' , 
+             longshot_vcf_path_pre = f'data/variantcalling/{rng}/2.1.realigned_genotypes_{rng}.vcf', 
+             true_variants= f'data/variantcalling/{rng}/chr20.GIAB_highconfidencecalls_{rng}.vcf', 
+             high_confidence_bed= f'data/variantcalling/{rng}/chr20.GIAB_highconfidenceregions_{rng}.bed')
+    benchmark_df.to_csv(f"data/variantcalling/{rng}/results_4.0.csv")         
+
+
+
+
+def test_real_data(rng = "1M_2M"):
+    fragments_path=f'data/variantcalling/{rng}/fragments.txt'
+    longshot_vcf_path=f'data/variantcalling/{rng}/2.0.realigned_genotypes_{rng}.vcf'
+    longshot_vcf_path_f=f'data/variantcalling/{rng}/2.1.realigned_genotypes_{rng}.vcf'
+    true_variants = f"data/variantcalling/{rng}/chr20.GIAB_highconfidencecalls_{rng}.vcf"
+    high_confidence_bed = f"data/variantcalling/{rng}/chr20.GIAB_highconfidenceregions_{rng}.bed"
     _, fragments, quals = read_fragments(fragments_path)
     callset = allel.read_vcf(longshot_vcf_path)
     filter = callset["variants/FILTER_PASS"]
@@ -84,10 +220,23 @@ def test_real_data():
     reads, st_en = cluster_fragments(*compress_fragments(fragments_filter, quals_filter))
     fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
     reads, st_en = cluster_fragments(*compress_fragments(fragments_filter, quals_filter))
+    # fv = [854, 132, 754, 198, 26, 199, 477, 613, 117, 2, 767, 11, 39, 761, 35, 536, 228]
+    # for v in fv:
+    #     import ipdb;ipdb.set_trace()
+    #     visualize_overlapping_reads_at(reads, st_en, v)
     reads, st_en, false_vars = remove_false_variants(reads, st_en, fragments_filter.shape[1], logging=True)
+    
     false_vars = dict(sorted(list(false_vars.items()), key= lambda v:(-1*v[1][1][0], -1*v[1][1][1])))
+    # 1-1M: 1-2257
+    # 1M-2M 2257:4468
+    # 2M-3M 4468:6538
+    # 3M-4M 6538:8390
+    # 4M-5M 8390:10762
 
-    map_filter_index = []
+
+    
+    
+
     mp = {}
     cnt = 0
     for i,  v in enumerate(filter):
@@ -101,7 +250,11 @@ def test_real_data():
         gt = v[0]
         loc_gt[index] = gt
 
-    with open(longshot_vcf_path_f, "r") as f:
+    callset = allel.read_vcf(longshot_vcf_path)
+    POS = [str(callset["variants/POS"][idx]) for idx in loc_gt]
+    print(POS)        
+
+    with open(longshot_vcf_path, "r") as f:
         lines = f.readlines()
 
     dlines = []
@@ -111,15 +264,54 @@ def test_real_data():
             dlines.append(line)
         else:
             hlines.append(line)
+    
+    for pos, (idx, gt) in zip(POS, loc_gt.items()):
+        ld = dlines[idx].split("\t")            
+        # ld1 = f"{gt}/{gt}" + ld[-1][3:]
+        # ld[-1] = ld1
+        #dlines[idx] = "\t".join(ld)
+        # Assert positions are the same
+        assert ld[1] == pos
 
-    for idx, gt in loc_gt.items():
-        ld = dlines[idx].split("\t")
-        ld1 = f"{gt}/{gt}" + ld[-1][3:]
-        ld[-1] = ld1
-        dlines[idx] = "\t".join(ld)
-        
+    #import ipdb;ipdb.set_trace() 
+    # ndlines = []
+    false_var_idxs = set(list(loc_gt.keys()))
+    # for i, ln in enumerate(dlines):
+    #     if i in false_var_idxs:
+    #         continue
+    #     ndlines.append(ln)
+    # dlines = ndlines
+    dlines = [ln for i, ln in enumerate(dlines) if i not in false_var_idxs]    
     with open(longshot_vcf_path_f, "w") as f:
         f.writelines(hlines)
         f.writelines(dlines)    
-        
+    # {1877: 1, 479: 1, 1698: 1, 587: 0, 104: 0, 588: 1, 1039: 1, 1482: 1, 427: 1, 2: 0, 1740: 1, 23: 1, 289: 0, 1707: 0, 248: 1, 1119: 0, 644: 1}
+    # ['1877119', '1302364', '1757678', '1352184', '1048931', '1352200', '1574507', '1684406', '1278060', '1000490', '1799385', '1008797',
+    #  '1150139', '1766116', '1125851', '1577470', '1383746']
+    benchmark_df = benchmark(longshot_vcf_path, longshot_vcf_path_f, true_variants, high_confidence_bed)
+    benchmark_df.to_csv(f"data/variantcalling/{rng}/results.csv")
+
+    # with open(true_variants, "r") as f:
+    #     lines = f.readlines()
+    # correct = []
+    # false = []
+    # dlines = []
+    # hlines = []
+    # for line in lines:
+    #     if line.startswith("chr20"):
+    #         dlines.append(line)
+    #     else:
+    #         hlines.append(line)
+
+    # tp, fp = 0, 0
+    # for dline in dlines:
+    #     pos = dline.split("\t")[1]
+    #     if pos in POS:
+    #         genotype = dline.split("\t")[-1][:3]
+    #         print(pos, genotype)
+    #         if genotype == "1/1" or genotype == "0/0":
+    #             tp += 1
+    #         else:
+    #             fp += 1                
+
         

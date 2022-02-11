@@ -20,13 +20,12 @@ def test_false_vars_locs(ref_length=30, coverage=6, read_length=5, std_read_leng
     _, __, false_vars = remove_false_variants(RS, ST_EN, len(ref_H[0]))
     assert not len(set(false_vars) - set(false_variant_locs))
     
-def test_real_data():
+def test_real_data(fragments_path='/home/ruchirgarg5/content/data/debug/fragments.txt',
+                   longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.0.realigned_genotypes.vcf',
+                   pre_processed_longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.1.realigned_genotypes_preprocessed.vcf',
+                   ground_truth_vcf_path='/home/ruchirgarg5/content/data/HG003_GRCh38_chr20_v4.2.1_benchmark.vcf.gz',
+                   giab_bed_path='/home/ruchirgarg5/content/data/HG003_GRCh38_chr20_v4.2.0_benchmark_noinconsistent.bed'):
     import allel
-    fragments_path='/home/ruchirgarg5/content/data/debug/fragments.txt'
-    longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.0.realigned_genotypes.vcf'
-    pre_processed_longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.0.realigned_genotypes_preprocessed.vcf'
-    ground_truth_vcf_path='/home/ruchirgarg5/content/data/HG003_GRCh38_chr20_v4.2.1_benchmark.vcf.gz'
-    giab_bed_path='/home/ruchirgarg5/content/data/HG003_GRCh38_chr20_v4.2.1_benchmark_noinconsistent.bed'
     a, fragments, quals = read_fragments(fragments_path)
     ls_callset = allel.read_vcf(longshot_vcf_path)
     ls_01 = np.all(np.equal(ls_callset['calldata/GT'], [0,1]), axis=2).T[0]
@@ -44,8 +43,9 @@ def test_real_data():
 
     ls_callset["calldata/GT"][ls_het] = ls_callset_hetero
     allel.write_vcf(pre_processed_longshot_vcf_path, ls_callset)
-
-
+    
+    get_hetero()
+    
      # coverages = get_coverage_for_all_the_sites(reads, st_en, len(fragments_het[0]))
     # het_likelihood = get_likelihood_with_haplotype_information(reads, st_en, len(fragments_het[0]))
     # epsilon = 0.04

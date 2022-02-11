@@ -90,10 +90,11 @@ def filter_fragment_for_range(fragment_file, st, en):
 	with open(fragment_file) as f:
 		for line in f:
 			line_data = line.strip().split()
-			
 			block_data = line_data[2:-1]
 			start = int(block_data[0])
 			end = int(block_data[-2]) + len(block_data[-1])
+			if start == 0:
+				import ipdb;ipdb.set_trace()
 			if start >= st and end <= en:
 				# Lies inside
 				lines_f.append(" ".join(line_data))
@@ -146,14 +147,13 @@ def filter_fragment_for_range(fragment_file, st, en):
 				nline_data = line_data[:2] + nblock_data
 
 				lines_f.append(" ".join(nline_data))
-					 			
-
-    
+      
 	filen = str(fragment_file).split(".")[0] 
 	fn =   f"{filen}_{st}_{en}.txt"
 
 	with open(fn, "w") as fd:
 		fd.write("\n".join(lines_f))
+	return fn		
 
 
 

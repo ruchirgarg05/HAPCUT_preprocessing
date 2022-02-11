@@ -58,9 +58,11 @@ def get_overlapping_fragments_for_variants_sites(reads, st_ens, index):
     for read, st_en in zip(reads, st_ens):
         if st_en[0] > index:
             break
-        if index>=st_en[0] and index<st_en[1] and read[0][index - st_en[0]] != -1.:            
-            overalapping_frags.append(read)
-            overlapping_st_ens.append(st_en)
+        if index>=st_en[0] and index<st_en[1]:
+            if read[0][index - st_en[0]] != -1.:            
+                overalapping_frags.append(read)
+                overlapping_st_ens.append(st_en)
+    #import ipdb;ipdb.set_trace()            
     return overalapping_frags, overlapping_st_ens
 
 
