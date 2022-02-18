@@ -199,7 +199,7 @@ def get_coverage_for_all_the_sites(reads, st_en, ref_H_len):
 def get_likelihood_with_haplotype_information(reads, st_en, ref_H_len):
     likelihood_heterozygous_sites = []
     for i in range(ref_H_len):
-        likelihood_heterozygous_sites.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i), i))
+        likelihood_heterozygous_sites.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i), i))    
     return likelihood_heterozygous_sites
 
 def classifier(likelihood_heterozygous_sites, coverages, epsilon=0.):
@@ -214,7 +214,8 @@ def classifier(likelihood_heterozygous_sites, coverages, epsilon=0.):
                 false_variant_locs.append((idx,  (confid, coverage ) ))
     return false_variant_locs
 
-
+def get_false_homozygous_sites():
+    pass
 
 def remove_false_variants(reads, st_en, ref_H_len, logging=False):
     """

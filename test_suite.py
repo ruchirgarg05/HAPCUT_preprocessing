@@ -220,7 +220,14 @@ def test_real_data(rng = "1M_2M"):
     filter = callset["variants/FILTER_PASS"]
     ls_01 = np.all(np.equal(callset['calldata/GT'], [0,1]), axis=2).T[0]
     ls_10 = np.all(np.equal(callset['calldata/GT'], [1,0]), axis=2).T[0]
+    ls_00 = np.all(np.equal(callset['calldata/GT'], [0,0]), axis=2).T[0]
+    ls_11 = np.all(np.equal(callset['calldata/GT'], [1,1]), axis=2).T[0]
+    ls_homo = ls_00 | ls_11
     ls_hetero = ls_01 | ls_10
+
+    filter_homo = filter & ls_homo
+    # filter should be filter & filter_hetero since the algo works using the heterozygous 
+    # alleles
     filter = filter & ls_hetero
     fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
     reads, st_en = cluster_fragments(*compress_fragments(fragments_filter, quals_filter))
@@ -238,10 +245,6 @@ def test_real_data(rng = "1M_2M"):
     # 2M-3M 4468:6538
     # 3M-4M 6538:8390
     # 4M-5M 8390:10762
-
-
-    
-    
 
     mp = {}
     cnt = 0
