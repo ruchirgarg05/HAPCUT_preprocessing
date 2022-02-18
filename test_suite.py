@@ -153,11 +153,12 @@ def script_create_data_fragments(s, e, create=False):
         # import subprocess
         # process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
         # output, error = process.communicate()
-    
+    import ipdb;ipdb.set_trace()
     rng = f"{s}M_{e}M"
     pdir = "data/variantcalling/"
     dir_name = f'{pdir}{rng}'
     cmds =[
+    f"rm -r {dir_name}",    
     f"mkdir {dir_name}",
     f"tabix  -h {pdir}2.0.realigned_genotypes.vcf.gz chr20:{s},000,000-{e},000,000 > {dir_name}/2.0.realigned_genotypes_{rng}.vcf",
     f"bgzip -c {dir_name}/2.0.realigned_genotypes_{rng}.vcf > {dir_name}/2.0.realigned_genotypes_{rng}.vcf.gz",
@@ -173,8 +174,11 @@ def script_create_data_fragments(s, e, create=False):
     if create:
         for cmd in cmds:
             run_cmd(cmd)
+    ipdb.set_trace()        
     get_index_for_fragment_path(f'data/variantcalling/{rng}/2.0.realigned_genotypes_{rng}.vcf')
     test_real_data(rng)
+
+   
 
 def test_script_final_genotypes(s, e, create=False):
     import ipdb;ipdb.set_trace()
@@ -194,7 +198,7 @@ def test_script_final_genotypes(s, e, create=False):
         for cmd in cmds:
             run_cmd(cmd)
 
-    benchmark_df = benchmark(longshot_vcf_path = f'data/variantcalling/{rng}/4.0.realigned_genotypes_{rng}.vcf' , 
+    benchmark_df = benchmark(longshot_vcf_path = f'data/variantcalling/{rng}/4.0.final_genotypes_{rng}.vcf' , 
              longshot_vcf_path_pre = f'data/variantcalling/{rng}/2.1.realigned_genotypes_{rng}.vcf', 
              true_variants= f'data/variantcalling/{rng}/chr20.GIAB_highconfidencecalls_{rng}.vcf', 
              high_confidence_bed= f'data/variantcalling/{rng}/chr20.GIAB_highconfidenceregions_{rng}.bed')
