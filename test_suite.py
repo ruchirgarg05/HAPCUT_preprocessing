@@ -132,11 +132,12 @@ def benchmark(longshot_vcf_path = 'data/variantcalling/1M_2M/2.0.realigned_genot
 
 def get_index_for_fragment_path(frag_vcf, frag_file="data/variantcalling/fragments.txt", 
                                 full_vcf="data/variantcalling/2.0.realigned_genotypes.vcf"):
+    import ipdb;ipdb.set_trace()
     callset = allel.read_vcf(full_vcf)
     POS = callset["variants/POS"]
     callset_frag = allel.read_vcf(frag_vcf)
     POS_fragment = callset_frag["variants/POS"]
-    index_st =  np.where(POS == POS_fragment[0])[0][0] + 1
+    index_st =  np.where(POS == POS_fragment[0])[0][0]
     index_en = index_st + POS_fragment.shape[0]
     fn = filter_fragment_for_range(frag_file, index_st, index_en)
     frag_file = "/".join(frag_vcf.split("/")[:-1]) + "/fragments.txt"
@@ -208,6 +209,7 @@ def test_script_final_genotypes(s, e, create=False):
 
 
 def test_real_data(rng = "1M_2M"):
+    import ipdb;ipdb.set_trace()
     fragments_path=f'data/variantcalling/{rng}/fragments.txt'
     longshot_vcf_path=f'data/variantcalling/{rng}/2.0.realigned_genotypes_{rng}.vcf'
     longshot_vcf_path_f=f'data/variantcalling/{rng}/2.1.realigned_genotypes_{rng}.vcf'

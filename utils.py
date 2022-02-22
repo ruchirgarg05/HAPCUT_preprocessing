@@ -57,7 +57,7 @@ def read_fragments_arrays(fragments_path):
 
 			# get sample's row,col pairs and allele vals
 			block_data = line_data[2:-1]
-            
+			l_al_vals  = []
 			for i in range(0, len(block_data), 2):
 				block_start_ind = int(block_data[i])
 
@@ -65,15 +65,23 @@ def read_fragments_arrays(fragments_path):
 					row_col_pairs.append(
 						(row_ind, block_start_ind + start_offset)
 					)
+					l_al_vals.append(block_data[i + 1][start_offset])
 					allele_vals.append(block_data[i + 1][start_offset])
 
 			# add quality scores
 			qual_str = line_data[-1]
+			nqvals = []
 			for char in qual_str:
+				nqvals.append(ord(char) - 33)
 				qual_scores.append(ord(char) - 33)
 
 			row_ind += 1
-
+			try:
+				assert len(allele_vals) == len(qual_scores)
+				#assert len(nqvals) == len(l_al_vals)
+			except:
+				#pass
+				import ipdb;ipdb.set_trace()	
 		# set indices to start at 0
 		row_col_pairs = np.array(row_col_pairs)
 		row_col_pairs -= row_col_pairs.min(axis=0, keepdims=True)
@@ -86,30 +94,36 @@ def read_fragments_arrays(fragments_path):
 		return farrays
 
 def filter_fragment_for_range(fragment_file, st, en):
+	"""
+	Filter fragments for range [st, en)
+	Note: the fragment file is 1 indexed based
+	"""
 	lines_f =  []
 	with open(fragment_file) as f:
-		for line in f:
+		for ix, line in enumerate(f):
 			line_data = line.strip().split()
 			block_data = line_data[2:-1]
-			start = int(block_data[0])
-			end = int(block_data[-2]) + len(block_data[-1])
-			if start == 0:
+			# Make it zero indexed.
+			start = int(block_data[0]) - 1 
+			end = int(block_data[-2]) + len(block_data[-1]) - 1
+			# start, end is inclusive. 
+			if int(block_data[0]) == 0:
 				import ipdb;ipdb.set_trace()
-			if start >= st and end <= en:
+			if start >= st and end < en:
 				# Lies inside
 				lines_f.append(" ".join(line_data))
-			elif start > en or end <= st:
+			elif start >= en or end < st:
 				continue
 			else:
-				continue
 				qual_scores = []
 				qual_str = line_data[-1]
 				for char in qual_str:
-					qual_scores.append(ord(char) - 33)
+					qual_scores.append(ord(char) - 33)	
 				cnt_qual = 0
 				al_count = 0
 				nblock_data = []
 				nqual_scores = []
+				
 				for i in range(0, len(block_data), 2):
 					block_st_index = int(block_data[i]) - 1 
 
@@ -123,30 +137,35 @@ def filter_fragment_for_range(fragment_file, st, en):
 					else:
 						#import ipdb;ipdb.set_trace()
 						nbdata = ""
-
+						fr_st_index = None 
 						for start_offset, al in enumerate(block_data[i+1]):
 							#cnt_qual += 1
-							if start_offset + block_st_index + 1 >= en:
+							if start_offset + block_st_index >= en:
 								cnt_qual += 1
 								continue
-							if start_offset + block_st_index <= st:
+							if start_offset + block_st_index < st:
 								cnt_qual += 1
 								continue
+							if not len(nbdata):
+								fr_st_index = block_st_index + start_offset
 							nbdata += al
 							al_count += 1
 							nqual_scores.append(qual_scores[cnt_qual])	
 							cnt_qual += 1
 						if len(nbdata):
-							nblock_data.append(str(block_st_index+1))
+							assert fr_st_index+1 > st	
+							nblock_data.append(str(fr_st_index+1))
 							nblock_data.append(nbdata)
 						
 				qscores = "".join([chr(v + 33) for v in nqual_scores])
-				#import ipdb;ipdb.set_trace()
-				assert len(qscores) == al_count
-				nblock_data.append(qscores)
-				nline_data = line_data[:2] + nblock_data
+				
 
-				lines_f.append(" ".join(nline_data))
+				assert len(nqual_scores) == len("".join(nblock_data[1::2]))
+				if len(nqual_scores):
+					nblock_data.append(qscores)
+					nline_data = line_data[:2] + nblock_data
+
+					lines_f.append(" ".join(nline_data))
       
 	filen = str(fragment_file).split(".")[0] 
 	fn =   f"{filen}_{st}_{en}.txt"
