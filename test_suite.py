@@ -91,10 +91,22 @@ def benchmark(longshot_vcf_path = 'data/variantcalling/1M_2M/2.0.realigned_genot
     input_het, input_homo = get_genotypes_from_vcf(longshot_vcf_path, high_confidence_bed)
     output_het, output_homo = get_genotypes_from_vcf(longshot_vcf_path_pre, high_confidence_bed)
     true_vals_het, true_vals_homo = get_genotypes_from_vcf(true_variants, high_confidence_bed)
-    
     true_vals_pass = true_vals_het.union(true_vals_homo) 
     input_pass = input_het.union(input_homo)
-  
+
+    import ipdb;ipdb.set_trace()
+    callset = allel.read_vcf(longshot_vcf_path)
+    ls = list(callset["variants/POS"])
+    # misclassified
+    idxs = [ls.index(v) for v in true_vals_het.intersection(input_homo)]
+    print(idxs)
+    idxs_homo_fp = set(input_homo) - set(true_vals_pass)
+    idxs_homo_fp_idxs = [ls.index(v) for v in idxs_homo_fp]
+    print(idxs_homo_fp_idxs)
+    idxs = [ls.index(v) for v in set(input_homo).intersection(true_vals_pass)]
+    idx_common = [ls.index(v) for v in    true_vals_pass.intersection(input_homo)]
+    print(idx_common)
+
     # All the sites that are heterozygous that are present in true_vcf
     inp_present_in_tv = true_vals_pass.intersection(input_het)
 
@@ -229,14 +241,17 @@ def test_real_data(rng = "1M_2M"):
     # filter should be filter & filter_hetero since the algo works using the heterozygous 
     # alleles
     filter = filter & ls_hetero
-    fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
-    reads, st_en = cluster_fragments(*compress_fragments(fragments_filter, quals_filter))
+
+    false_homo = get_false_homozygous_sites(fragments, quals, filter_homo, filter)
+    false_homo = sorted(false_homo, key=lambda v:-1*v[1])
+    ipdb.set_trace()
+    #[1562, 1563, 429, 749, 1860, 1902, 2174, 1687, 1863, 1864, 1975, 1626, 1680]
     fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
     reads, st_en = cluster_fragments(*compress_fragments(fragments_filter, quals_filter))
     # fv = [854, 132, 754, 198, 26, 199, 477, 613, 117, 2, 767, 11, 39, 761, 35, 536, 228]
     # for v in fv:
     #     import ipdb;ipdb.set_trace()
-    #     visualize_overlapping_reads_at(reads, st_en, v)
+    #     visualize_overlapping_reads_at(reads, st_en, v
     reads, st_en, false_vars = remove_false_variants(reads, st_en, fragments_filter.shape[1], logging=True)
     
     false_vars = dict(sorted(list(false_vars.items()), key= lambda v:(-1*v[1][1][0], -1*v[1][1][1])))

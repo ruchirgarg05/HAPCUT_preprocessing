@@ -143,7 +143,7 @@ def convert_qualities_to_error_rate(reads):
     reads_er.append((frag, np.power(10, -0.1*qual)))
   return reads_er  
 
-def compress_fragments(fragments, qualities):
+def compress_fragments(fragments, qualities, return_index=False):
   """
   Get a matrix of 0, 1, np.nan for each read. 
   We need to return st, en and the fragment
@@ -151,11 +151,11 @@ def compress_fragments(fragments, qualities):
   #import ipdb;ipdb.set_trace()
   reads, st_en = [], []
   qualities = np.power(10, -0.1*qualities)
-  
+  index = []
   assert fragments.shape == qualities.shape
   fragments = np.nan_to_num(fragments, nan=-1.)
   
-  for frag, qual in zip(fragments, qualities):
+  for i, (frag, qual) in enumerate(zip(fragments, qualities)):
     ones = np.where(frag==1.)[0]
     zeros = np.where(frag==0.)[0]
     if not len(ones) and not len(zeros):
@@ -179,6 +179,9 @@ def compress_fragments(fragments, qualities):
     # Each fragment either has 0, or 1 or
     reads.append((frag[s:e+1], qual[s:e+1]))
     st_en.append((s, e+1))
+    index.append(i)
+  if return_index:
+    return reads, st_en, index
   return reads, st_en
 
 def visualize_overlapping_reads_at(reads, st_en, index):
@@ -428,10 +431,17 @@ def simulate_haplotypes_errors(
     return hap_samples, reads_st_en, fragfilecontent
   
 
-def cluster_fragments(hap_samples, st_en):
-  #import pdb;pdb.set_trace()  
-  H_samples = [((st,en), sample) for (st, en), sample in zip(st_en, hap_samples)]
+def cluster_fragments(hap_samples, st_en, index=None):
+  #import pdb;pdb.set_trace() 
+  if index is None:
+    H_samples = [((st,en), sample) for (st, en), sample in zip(st_en, hap_samples)]
+  else:
+    H_samples = [((st,en), sample, idx) for (st, en), sample, idx in zip(st_en, hap_samples, index)]
+  
   H_samples = sorted(H_samples, key=lambda V: (V[0][0], -1*V[0][1]))
-  st_en = [(st, en) for (st, en), _ in H_samples]
-  samples = [sample for _, sample in H_samples]
-  return samples, st_en
+  if index is None:
+    st_en, samples  = list(zip(*H_samples))
+    return samples, st_en
+  else:
+    st_en, samples, indexes  = list(zip(*H_samples))
+    return samples, st_en, indexes
