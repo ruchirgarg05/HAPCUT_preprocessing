@@ -20,7 +20,7 @@ def test_false_vars_locs(ref_length=30, coverage=6, read_length=5, std_read_leng
     _, __, false_vars = remove_false_variants(RS, ST_EN, len(ref_H[0]))
     assert not len(set(false_vars) - set(false_variant_locs))
     
-def test_real_data(fragments_path='/home/ruchirgarg5/content/data/debug/fragments.txt',
+def test_real_data_1(fragments_path='/home/ruchirgarg5/content/data/debug/fragments.txt',
                    longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.0.realigned_genotypes.vcf',
                    pre_processed_longshot_vcf_path='/home/ruchirgarg5/content/data/debug/2.1.realigned_genotypes_preprocessed.vcf',
                    ground_truth_vcf_path='/home/ruchirgarg5/content/data/HG003_GRCh38_chr20_v4.2.1_benchmark.vcf.gz',

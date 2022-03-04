@@ -47,8 +47,7 @@ def get_probability_fragments_from_same_fragment(reads, st_ens, index=None):
     same, diff = same/sum_prob, diff/sum_prob  
     return same, diff
 
-
-def get_overlapping_fragments_for_variants_sites(reads, st_ens, index, rindex=None):
+def get_overlapping_fragments_for_variants_sites(reads, st_ens, index, rindex=None, fragments=None, homo_col=None):
     """
     Return the fragments which contain the sites with variant at "index".
     """
@@ -66,6 +65,9 @@ def get_overlapping_fragments_for_variants_sites(reads, st_ens, index, rindex=No
         #import ipdb;ipdb.set_trace()            
         return overalapping_frags, overlapping_st_ens
     else:
+        # Finds overlapping sites for homo cols
+        assert homo_col is not None
+        assert fragments is not None
         reads, st_ens, rindex = cluster_fragments(reads, st_ens, rindex)
         overalapping_frags = []
         overlapping_st_ens = []
@@ -74,7 +76,9 @@ def get_overlapping_fragments_for_variants_sites(reads, st_ens, index, rindex=No
             if st_en[0] > index:
                 break
             if index>=st_en[0] and index<st_en[1]:
-                if read[0][index - st_en[0]] != -1.:            
+                 
+                #if read[0][index - st_en[0]] != -1.: 
+                if not np.isnan(fragments[idx][homo_col]):            
                     overalapping_frags.append(read)
                     overlapping_st_ens.append(st_en)
                     overlapping_index.append(idx)
@@ -90,15 +94,15 @@ def get_likelihood_heterozygous_genotype(reads, st_en, index=None, fvals=None):
     - coming from the different Haplotype.
     """
     assert len(reads) == 2 and len(st_en)==2
-    if index:
+    if index is not None:
         assert index>=max(st_en[0][0], st_en[1][0]) and index<=min(st_en[0][1], st_en[1][1])
         index0, index1 = index - st_en[0][0], index - st_en[1][0]
         try:
             assert index0 < len(reads[0][0]) and index1<len(reads[1][0])
         except:
             import ipdb;ipdb.set_trace()
-    frag0, frag1 = (reads[0][0][index0], reads[1][0][index1]) if index else (fvals[0][0], fvals[1][0])
-    qual0, qual1 = (reads[0][1][index0], reads[1][1][index1]) if index else (fvals[0][1], fvals[1][1])
+    frag0, frag1 = (reads[0][0][index0], reads[1][0][index1]) if index is not None else (fvals[0][0], fvals[1][0])
+    qual0, qual1 = (reads[0][1][index0], reads[1][1][index1]) if index is not None else (fvals[0][1], fvals[1][1])
     
     if frag0 == frag1:
         # Same value at the site
@@ -122,7 +126,6 @@ def calculate_likelihood_of_heterozygous_site(reads, st_en, index):
     param qual: the qual of the reads, currently it is a constant.maketrans()
     # TODO: Make qual an array which stores the qual of each of the index.
     """
-    #import ipdb;ipdb.set_trace()
     reads, st_en,  = cluster_fragments(reads, st_en)
     overlapping_reads, overlapping_st_en = get_overlapping_fragments_for_variants_sites(reads, st_en, index)    
     #generate_matrix_for_visualization(ref_H, false_variant_locs, overlapping_reads, overlapping_st_en)
@@ -218,7 +221,7 @@ def get_likelihood_with_haplotype_information(reads, st_en, ref_H_len):
         likelihood_heterozygous_sites.append((calculate_likelihood_of_heterozygous_site(reads, st_en, i), i))    
     return likelihood_heterozygous_sites
 
-def classifier(likelihood_heterozygous_sites, coverages, epsilon=0.):
+def classifier(likelihood_heterozygous_sites, coverages, epsilon=0.15):
     false_variant_locs = []
     likelihood_heterozygous_sites = sorted(likelihood_heterozygous_sites)
     for likelihood, idx in likelihood_heterozygous_sites:
@@ -230,16 +233,15 @@ def classifier(likelihood_heterozygous_sites, coverages, epsilon=0.):
                 false_variant_locs.append((idx,  (confid, coverage ) ))
     return false_variant_locs
 
-def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.15):
+def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.15, return_corresponding_het_index=False):
     fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
     index_homo, cnt = {}, 0
-    for i, (vhomo, vheter) in enumerate(zip(filter_homo, filter)):
+    for i, (vhomo, vheter) in enumerate(zip(filter_homo, filter)): 
         if vhomo:
-            index_homo[i] = cnt
+            index_homo[i] = cnt - 1
             
         elif vheter:    
             cnt += 1
-
     false_vars = []
     freads, fst_en, findex = cluster_fragments(*compress_fragments(fragments_filter, quals_filter, return_index=True))
     num_sites = 0
@@ -251,7 +253,7 @@ def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.
         alleles_qual = []
         overlapping_reads, overlapping_sts_ens, overlapping_idxs = [], [], []
 
-        o_reads, o_sts_ens, o_idxs = get_overlapping_fragments_for_variants_sites(freads, fst_en, idx, findex)
+        o_reads, o_sts_ens, o_idxs = get_overlapping_fragments_for_variants_sites(freads, fst_en, idx, findex,  fragments = fragments, homo_col = col)
         for read, st_en, fidx in zip(o_reads, o_sts_ens, o_idxs):
             if not np.isnan(fragments[fidx][col]):
                 overlapping_reads.append(read)
@@ -259,12 +261,13 @@ def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.
                 overlapping_idxs.append(fidx)
                 alleles.append(fragments[fidx][col])
                 alleles_qual.append(quals[fidx][col])
+        
+                
         coverage = len(overlapping_reads)
         alleles_qual = np.power(10, -0.1*np.array(alleles_qual))
         if coverage <= 15:
             continue 
-        threshold_prob_het = (0.5 - epsilon)**coverage
-
+        threshold_prob_het = (0.5 + epsilon)**coverage
         # Probability that the site is homozygous given the reads. 
         th_0, th_1 = 1., 1. 
         for al, q in zip(alleles, alleles_qual):
@@ -313,7 +316,10 @@ def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.
         # the likelihood of the site at index to be heterozygous
         heteroz_likelihood = likelihood_per_reads[-1][0] + likelihood_per_reads[-1][1]
         if heteroz_likelihood > threshold_prob_het and heteroz_likelihood > threshold_prob_homo:
-            false_vars.append((col, heteroz_likelihood/threshold_prob_homo, coverage))
+            if return_corresponding_het_index:
+                false_vars.append((col, heteroz_likelihood/threshold_prob_het, coverage, idx))
+            else:
+                false_vars.append((col, heteroz_likelihood/threshold_prob_het, coverage))
 
     return false_vars    
 
