@@ -86,48 +86,59 @@ def get_genotypes_from_vcf(vcf_file, bed=None):
 
 
 def benchmark(longshot_vcf_path = 'data/variantcalling/1M_2M/2.0.realigned_genotypes_1M_2M.vcf' , 
-             longshot_vcf_path_pre = 'data/variantcalling/1M_2M/2.1.realigned_genotypes_1M_2M.vcf', 
+             longshot_vcf_path_pre = 'data/variantcalling/1M_2M/2.1.realigned_genotypes_1M_2M.vcf',
+             longshot_final_path =  'data/variantcalling/1M_2M/4.0.final_genotypes_1M_2M.vcf', 
              true_variants='data/variantcalling/1M_2M/chr20.GIAB_highconfidencecalls_1M_2M.vcf', 
              high_confidence_bed='data/variantcalling/1M_2M/chr20.GIAB_highconfidenceregions_1M_2M.bed'):
+
     import pandas as pd
+
     input_het, input_homo_00, input_homo_11 = get_genotypes_from_vcf(longshot_vcf_path, high_confidence_bed)
     output_het, output_homo_00, output_homo_11 = get_genotypes_from_vcf(longshot_vcf_path_pre, high_confidence_bed)
     true_vals_het, true_vals_homo_00, true_values_homo_11 = get_genotypes_from_vcf(true_variants, high_confidence_bed)
+    fin_het, fin_homo_00, fin_homo_11 = get_genotypes_from_vcf(longshot_final_path, high_confidence_bed)
+
     true_vals_homo = true_vals_homo_00.union(true_values_homo_11)
+    
     true_vals_pass = true_vals_homo.union(true_vals_het)
     
     input_pass = input_het.union(input_homo_00).union(input_homo_11)
-
-
-    true_positives = len(input_het.intersection(true_vals_het)) + len(input_homo_11.intersection(true_values_homo_11))
-    false_positives = len(input_het - input_het.intersection(true_vals_het)) + len(input_homo_11 - input_homo_11.intersection(true_values_homo_11))
-
-    #false_positives = len(input_het.intersection(true_vals_homo)) + len(input_homo_11.intersection(true_vals_homo_00))
-    false_negatives = len(input_homo_00.intersection(true_values_homo_11.union(true_vals_het)))
-    input_precision = true_positives / (true_positives + false_positives)
-    input_recall = true_positives / (true_positives + false_negatives)
-    input_f1 = true_positives / (true_positives + 0.5*(false_positives + false_negatives))
+    
+    def get_precision_recall_f1(het, homo_11, homo_00):
+        tp = len(het.intersection(true_vals_het)) + len(homo_11.intersection(true_values_homo_11))
+        fp = len(het - het.intersection(true_vals_het)) + len(homo_11 - homo_11.intersection(true_values_homo_11))
+        fn = len(homo_00.intersection(true_values_homo_11.union(true_vals_het)))
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+        f1 = tp / (tp + 0.5 * (fp + fn))
+        return precision, recall, f1
+    
+    input_precision, input_recall, input_f1 = get_precision_recall_f1(input_het, input_homo_11, input_homo_00)
     inp_tcmp = len(input_pass.intersection(true_vals_pass))
     inp_frac_na = len(true_vals_pass - true_vals_pass.intersection(input_pass) ) / len(true_vals_pass)
 
     
     output_pass = output_het.union(output_homo_00).union(output_homo_11)
-    true_positives = len(output_het.intersection(true_vals_het)) + len(output_homo_11.intersection(true_values_homo_11))
-    false_positives = len(output_het - output_het.intersection(true_vals_het)) + len(output_homo_11 - output_homo_11.intersection(true_values_homo_11))
-    # true_positives = len(output_het.intersection(true_vals_het)) + len(output_homo_11.intersection(true_values_homo_11))
-    # false_positives = len(output_het.intersection(true_vals_homo)) + len(output_homo_11.intersection(true_vals_homo_00))
-    false_negatives = len(output_homo_00.intersection(true_values_homo_11.union(true_vals_het)))
-    output_precision = true_positives / (true_positives + false_positives)
-    output_recall = true_positives / (true_positives + false_negatives)
-    output_f1 = true_positives / (true_positives + 0.5*(false_positives + false_negatives))
+    output_precision, output_recall, output_f1 = get_precision_recall_f1(output_het, output_homo_11, output_homo_00)
+
     output_tcmp = len(output_pass.intersection(true_vals_pass))
     output_frac_na = len(true_vals_pass - true_vals_pass.intersection(output_pass) ) / len(true_vals_pass)
 
+    
+    fin_pass = fin_het.union(fin_homo_00).union(fin_homo_11)
+    fin_precision, fin_recall, fin_f1 = get_precision_recall_f1(fin_het, fin_homo_11, fin_homo_00)
+    fin_tcmp = len(fin_pass.intersection(true_vals_pass))
+    fin_frac_na = len(true_vals_pass - true_vals_pass.intersection(fin_pass)) / len(true_vals_pass)
+
+
     matrix = np.array([[inp_tcmp, input_precision, input_recall, input_f1, inp_frac_na],
-               [output_tcmp, output_precision, output_recall, output_f1, output_frac_na]])
+                       [output_tcmp, output_precision, output_recall, output_f1, output_frac_na],
+                       [fin_tcmp, fin_precision, fin_recall, fin_f1, fin_frac_na]])
+                       
+
     df = pd.DataFrame( matrix,
                            columns = ["tot_comparisons", "precision", "recall", "f1 score", "frac_na"], 
-                           index=["input", "pre_processed"]) 
+                           index=["input", "pre_processed", "longshot_final"]) 
 
     
     print(df.to_string())
@@ -170,6 +181,10 @@ def script_create_data_fragments(s, e, create=False):
     f"bgzip -c {dir_name}/2.0.realigned_genotypes_{rng}.vcf > {dir_name}/2.0.realigned_genotypes_{rng}.vcf.gz",
     f"tabix  -p vcf {dir_name}/2.0.realigned_genotypes_{rng}.vcf.gz",
 
+    f"tabix  -h {pdir}4.0.final_genotypes.vcf.gz chr20:{s},000,000-{e},000,000 > {dir_name}/4.0.final_genotypes_{rng}.vcf",
+    f"bgzip -c {dir_name}/4.0.final_genotypes_{rng}.vcf > {dir_name}/4.0.final_genotypes_{rng}.vcf.gz",
+    f"tabix  -p vcf {dir_name}/4.0.final_genotypes_{rng}.vcf.gz",
+
     f"tabix  -h {pdir}chr20.GIAB_highconfidencecalls.vcf.gz chr20:{s},000,000-{e},000,000 > {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf",
     f"bgzip -c {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf > {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf.gz",
     f"tabix -p vcf {dir_name}/chr20.GIAB_highconfidencecalls_{rng}.vcf.gz",
@@ -204,8 +219,9 @@ def test_script_final_genotypes(s, e, create=False):
         for cmd in cmds:
             run_cmd(cmd)
 
-    benchmark_df = benchmark(longshot_vcf_path = f'data/variantcalling/{rng}/4.0.final_genotypes_{rng}.vcf' , 
-             longshot_vcf_path_pre = f'data/variantcalling/{rng}/2.1.realigned_genotypes_{rng}.vcf', 
+    benchmark_df = benchmark(longshot_vcf_path = f'data/variantcalling/{rng}/2.0.realigned_genotypes_{rng}.vcf' , 
+             longshot_vcf_path_pre = f'data/variantcalling/{rng}/2.1.realigned_genotypes_{rng}.vcf',
+             longshot_final_path = f'data/variantcalling/{rng}/4.0.final_genotypes_{rng}.vcf',  
              true_variants= f'data/variantcalling/{rng}/chr20.GIAB_highconfidencecalls_{rng}.vcf', 
              high_confidence_bed= f'data/variantcalling/{rng}/chr20.GIAB_highconfidenceregions_{rng}.bed')
     benchmark_df.to_csv(f"data/variantcalling/{rng}/results_4.0.csv")         
@@ -271,11 +287,12 @@ def write_to_vcf_like(longshot_vcf_file, positions_dict, position_vars, file_nam
 
 
 
-def test_real_data(rng = "1M_2M", write_homo=False):
+def test_real_data(rng = "1M_2M", write_homo=False, write_hetero=True):
     import ipdb;ipdb.set_trace()
     fragments_path=f'data/variantcalling/{rng}/fragments.txt'
     longshot_vcf_path=f'data/variantcalling/{rng}/2.0.realigned_genotypes_{rng}.vcf'
     longshot_vcf_path_f=f'data/variantcalling/{rng}/2.1.realigned_genotypes_{rng}.vcf'
+    longshot_vcf_path_final = f'data/variantcalling/{rng}/4.0.final_genotypes_{rng}.vcf'
     true_variants = f"data/variantcalling/{rng}/chr20.GIAB_highconfidencecalls_{rng}.vcf"
     high_confidence_bed = f"data/variantcalling/{rng}/chr20.GIAB_highconfidenceregions_{rng}.bed"
     _, fragments, quals = read_fragments(fragments_path)
@@ -309,11 +326,10 @@ def test_real_data(rng = "1M_2M", write_homo=False):
     import ipdb;ipdb.set_trace()
 
     false_homo = get_false_homozygous_sites(fragments, quals, filter_homo, filter)
-
+    #false_homo = []
     import ipdb;ipdb.set_trace()
     false_homo = sorted(false_homo, key=lambda v:-1*v[1])
     posis = [x for x ,_, __ in false_homo]
-    idxs = [idx for _, _, __, idx in false_homo]
     vcallset = allel.read_vcf(longshot_vcf_path)
      
     posis_false_homo = [vcallset["variants/POS"][idx] for idx in posis]
@@ -328,9 +344,18 @@ def test_real_data(rng = "1M_2M", write_homo=False):
     import ipdb;ipdb.set_trace()
     nposis = []
     nratio = []
-    
+    ac0__ac1_am_dp = []
+    labels = []
     for i, idx in enumerate(posis):
-        ac, am = callset["variants/AC"][idx], callset["variants/AM"][idx]
+        ac, am, dp = callset["variants/AC"][idx], callset["variants/AM"][idx], callset["variants/DP"]
+        pos = vcallset["variants/POS"][idx]
+        if pos in tcallset["variants/POS"]:
+            index = np.where(tcallset["variants/POS"] == pos)
+            labels.append(True)
+        label = True if pos in tcallset["variants/POS"] else False
+        labels.append(label)
+
+        ac0__ac1_am_dp.append(np.array([ac[0], ac[1], am, dp]))
         ratio = (ac[1] + am) / ac[0]
         ratio_ambig_alt_by_ref.append(str(ratio))
         logconfid = (false_homo[i][2] - log_confid_mean) /  log_confid_mean 
@@ -340,6 +365,9 @@ def test_real_data(rng = "1M_2M", write_homo=False):
         if ratio > 0.5:
             nposis.append(idx)
             nratio.append(str((ratio, summ, prod)))
+    import ipdb;ipdb.set_trace()
+    # import sklearn
+    # features = sklearn.feature_selection.f_regression( np.array(ac0__ac1_am_dp), labels, )
     nposis_false_homo = [vcallset["variants/POS"][idx] for idx in nposis]
     n_false_homo = []
     n_genotype_ls_vcf = ["/".join([str(v) for v in vcallset["calldata/GT"][idx][0]]) for idx in nposis]    
@@ -409,6 +437,8 @@ def test_real_data(rng = "1M_2M", write_homo=False):
     
     false_vars_00_01 = [vcallset["variants/POS"][idx] for idx in nposis if len(np.nonzero(vcallset["calldata/GT"][idx][0])[0])==0]
     false_vars_11_01 = [vcallset["variants/POS"][idx] for idx in nposis if len(np.nonzero(vcallset["calldata/GT"][idx][0])[0])==2]
+    
+    
     false_vars_01_00 = POS
     
     create_confusion_matrix(longshot_vcf_path, longshot_vcf_path_f, false_vars_00_01, false_vars_01_00, false_vars_11_01)
@@ -422,11 +452,12 @@ def test_real_data(rng = "1M_2M", write_homo=False):
             dlines.append(line)
         else:
             hlines.append(line)
-
+    
     false_var_idxs = set(list(loc_gt.keys()))
-    dlines = [ln for i, ln in enumerate(dlines) if i not in false_var_idxs]
+    if write_hetero:
+        dlines = [ln for i, ln in enumerate(dlines) if i not in false_var_idxs]
     if write_homo:
-
+        import ipdb;ipdb.set_trace()
         ndlines = []
         for line in dlines:
             ln = line.split("\t")
@@ -436,11 +467,12 @@ def test_real_data(rng = "1M_2M", write_homo=False):
                 ndlines.append("\t".join(ln))
             else:
                 ndlines.append(line)          
-        dlines = ndlines             
+        dlines = ndlines 
+
     with open(longshot_vcf_path_f, "w") as f:
         f.writelines(hlines)
         f.writelines(dlines)
 
-    benchmark_df = benchmark(longshot_vcf_path, longshot_vcf_path_f, true_variants, high_confidence_bed)
+    benchmark_df = benchmark(longshot_vcf_path, longshot_vcf_path_f, longshot_vcf_path_final, true_variants, high_confidence_bed)
     benchmark_df.to_csv(f"data/variantcalling/{rng}/results.csv")
         

@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from sim_util import cluster_fragments, generate_matrix_for_visualization, compress_fragments
+from sim_util import cluster_fragments, generate_matrix_for_visualization, compress_fragments, visualize_overlapping_reads_at
 
 
 def get_probability_fragments_from_same_fragment(reads, st_ens, index=None):
@@ -118,6 +118,7 @@ def get_likelihood_heterozygous_genotype(reads, st_en, index=None, fvals=None):
     sum_likelihood = likelihood_same + likelihood_diff   
     return likelihood_same/ sum_likelihood, likelihood_diff/ sum_likelihood
 
+priors = {"00:00": 0.995, "00:01":0.0025, "00:11": 0.0025}
 
 def calculate_likelihood_of_heterozygous_site(reads, st_en, index):
     """
@@ -126,6 +127,7 @@ def calculate_likelihood_of_heterozygous_site(reads, st_en, index):
     param qual: the qual of the reads, currently it is a constant.maketrans()
     # TODO: Make qual an array which stores the qual of each of the index.
     """
+
     reads, st_en,  = cluster_fragments(reads, st_en)
     overlapping_reads, overlapping_st_en = get_overlapping_fragments_for_variants_sites(reads, st_en, index)    
     #generate_matrix_for_visualization(ref_H, false_variant_locs, overlapping_reads, overlapping_st_en)
@@ -233,7 +235,7 @@ def classifier(likelihood_heterozygous_sites, coverages, epsilon=0.15):
                 false_variant_locs.append((idx,  (confid, coverage ) ))
     return false_variant_locs
 
-def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.15, return_corresponding_het_index=False):
+def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.15, return_het_idx_al_col=False):
     fragments_filter, quals_filter = fragments[:, filter], quals[:, filter]
     index_homo, cnt = {}, 0
     for i, (vhomo, vheter) in enumerate(zip(filter_homo, filter)): 
@@ -287,8 +289,24 @@ def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.
         #likelihood_per_reads = [(1-qual, qual) if frag[0] == 0 else (qual, 1-qual)]
         
         likelihood_per_reads = [(1-qual_v, qual_v) if al_v == 0 else (qual_v, 1-qual_v)]
-        # if col == 1227:
-        #      import ipdb;ipdb.set_trace()
+        if col == 1708:
+            import ipdb;ipdb.set_trace()
+            print(alleles)
+            visualize_overlapping_reads_at(overlapping_reads, overlapping_sts_ens, idx)
+        
+        M = [[0  for _ in range(coverage)] for __ in range(coverage)]
+        for i in range(coverage):
+            f_i = (overlapping_reads[i], overlapping_sts_ens[i])
+            for j in range(coverage):
+                f_j = (overlapping_reads[j], overlapping_sts_ens[j])
+                r, s_e = [f_i[0], f_j[0]], [f_i[1], f_j[1]] 
+                M[i][j] = get_probability_fragments_from_same_fragment(r, s_e)
+        
+        order = [(overlapping_reads[0], overlapping_sts_ens[0])]
+
+        while len(order) != coverage:
+            
+
         for i in range(1, coverage):
             frag_1 = (overlapping_reads[i], overlapping_sts_ens[i])
             
@@ -314,12 +332,9 @@ def get_false_homozygous_sites(fragments, quals, filter_homo, filter, epsilon=0.
             frag_0 = frag_1
         # Finally my likelihood per_reads would contain,
         # the likelihood of the site at index to be heterozygous
-        heteroz_likelihood = likelihood_per_reads[-1][0] + likelihood_per_reads[-1][1]
+        heteroz_likelihood = (likelihood_per_reads[-1][0] + likelihood_per_reads[-1][1]) * priors["00:01"]
         if heteroz_likelihood > threshold_prob_het and heteroz_likelihood > threshold_prob_homo:
-            if return_corresponding_het_index:
-                false_vars.append((col, heteroz_likelihood/threshold_prob_het, coverage, idx))
-            else:
-                false_vars.append((col, heteroz_likelihood/threshold_prob_het, coverage))
+            false_vars.append((col, heteroz_likelihood/threshold_prob_het, coverage))
 
     return false_vars    
 
