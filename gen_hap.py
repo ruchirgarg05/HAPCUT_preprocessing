@@ -24,11 +24,10 @@ def get_likelihood_read_given_hap(read, qual, H):
         param h: Haplotype of len Frags[:, subset].shape[1] 
         """
         assert read.shape == qual.shape == h.shape
+        # Get all reads, i.e. ignnore the indexes having value nan. hea
         indexes = np.argwhere(~np.isnan(read)).flatten()
         likelihood = 1.
         for idx in indexes:
-            if np.isnan(read[idx]):
-                continue 
             if read[idx] == h[idx]:
                 likelihood *=  (1 - qual[idx])
             else:
@@ -158,18 +157,19 @@ class BlockStore:
         index = self.hashd.get(block, None)
         if index is None:
             return
+        # index = self.blocks.index(bloc)    
 
         # If present remove the element from the hash
         self.hashes.remove(block.hash())   
         del self.hashd[block]
 
         # Swap element with the last element as the removal from the 
-        # end of the list can be done in O(1) time. 
+        # end of the list can be done in O(1) time.
         sz = len(self.blocks)
         last = self.blocks[sz - 1]
         self.blocks[index], self.blocks[sz-1] = self.blocks[sz -1], self.blocks[index]
         del self.blocks[-1]
-        self.hashd[last] = index        
+        self.hashd[last] = index 
 
 
 
@@ -197,16 +197,22 @@ def get_blocks_for_reads(fragments_path):
     heap = []
 
     ipdb.set_trace()
-    for i in range(len(block_store.blocks)):
-        for j in range(len(block_store.blocks)):
-            if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
-                # There are no reads connecting the two blocks as of now, 
-                # Hence no need to check whether the two should be merged. 
-                continue
-            l, hap, cols = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
-            ed_val = l / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
-            edge = Edge(ed_val, block_store.blocks[i], block_store.blocks[j], hap, cols)
-            heap.append(edge)
+    import pickle
+    if os.path.exists("heap.pkl"):
+        with open("heap.pkl", "rb") as fd:
+            heap = pickle.load(fd)
+    else:
+
+        for i in range(len(block_store.blocks)):
+            for j in range(len(block_store.blocks)):
+                if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
+                    # There are no reads connecting the two blocks as of now, 
+                    # Hence no need to check whether the two should be merged. 
+                    continue
+                l, hap, cols = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
+                ed_val = l / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
+                edge = Edge(ed_val, block_store.blocks[i], block_store.blocks[j], hap, cols)
+                heap.append(edge)
     
     ipdb.set_trace()
     heapq.heapify(heap)
@@ -226,6 +232,8 @@ def get_blocks_for_reads(fragments_path):
             break
 
         merge_blocks(b1, b2, hap, cols)
+        
+    import ipdb;ipdb.set_trace()
     
     return block_store     
 
@@ -235,8 +243,14 @@ def merge_blocks(b1, b2, hap, cols):
     # Merge blocks and change the value of the haplotype block. 
     new_block = Block(cols)
     global block_store, H, H1, H2
-    block_store.remove(b1)
-    block_store.remove(b2)
+    try:
+        block_store.remove(b1)
+        block_store.remove(b2)
+    except:
+        import ipdb;ipdb.set_trace()
+        block_store.remove(b1)
+        block_store.remove(b2)  
+     
     block_store.add(new_block)
     H1[cols], H2[cols] = hap[0], hap[1]
     H = [H1, H2]
@@ -245,8 +259,12 @@ def merge_blocks(b1, b2, hap, cols):
     # add new edges to the heap
     new_block_likelihood = new_block.likelihood 
     for block in block_store.blocks:
-        if block.is_connected(new_block):
-            nl, nhap, ncols = new_block.get_likelihood_of_merged(block)
+        if block.is_connected(new_block) and not len(set(block.cols).intersection(new_block.cols)):
+            try:
+                nl, nhap, ncols = new_block.get_likelihood_of_merged(block)
+            except:
+                import ipdb;ipdb.set_trace()
+                pass
             ed_val = nl / (new_block_likelihood * block.likelihood)
             edge = Edge(ed_val, new_block, block, nhap, ncols)
             heapq.heappush(heap, edge)
