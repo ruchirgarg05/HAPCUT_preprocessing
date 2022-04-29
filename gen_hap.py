@@ -1,5 +1,6 @@
 
 
+from statistics import correlation
 from utils import *
 from sim_util import *
 import heapq
@@ -8,7 +9,10 @@ import heapq
 Frags, Quals = None, None
 H, H1, H2 = None, None, None
 block_store = None
+cluster_store = None
 heap = None
+INF = 4e9
+
 # to maximize ( prod( P(partition | H (Subset(partion)) )) overall partions ) / (C * num_partitions)
 # C is a HyperParameter (Should be tuned) 
 C = 1.
@@ -162,29 +166,20 @@ class Block:
 
         
         
-        # reads, quals =  Frags.take(read_indexes, axis=0), Quals.take(read_indexes, axis=0)
-        # reads, quals = reads.take(cols, axis=1), quals.take(cols, axis=1)
 
-        
-        # l1, l2 = 1., 1. 
-
-        # for read, qual in zip(reads, quals):
-        #     # TODO: Make this sum of log(lik)
-        #     l1 *= (get_likelihood_read_given_hap(read, qual, hap1))
-        #     l2 *= (get_likelihood_read_given_hap(read, qual, hap2))
-
-        # if l1 > l2:
-        #     return l1, hap1, cols
-
-        # return l2, hap2, cols
+# IDEA: Store the edges for each block, i.e. the blocks that it is connected
+# with, so during the merge, we remove this block and all the edge in adjacent
+# blocks, while adding new edges to the new_block. 
+# But this would require more memory. (This should be faster as we wont need to 
+# traverse to all the blocks to check whether or not it is connected.)
 
 class Edge:
-    def __init__(self, b1, b2, b1b2):
+    def __init__(self, u, v, merged):
         # The factor by which the likelihood increases if blocks b1 and 
         # b2 are merged.
-        self.u = b1
-        self.v = b2
-        self.merged = b1b2
+        self.u = u
+        self.v = v
+        self.merged = merged
         self.lik = self.merged.likelihood / (self.u.likelihood * self.v.likelihood)
 
     def __lt__(self, other):
@@ -231,50 +226,25 @@ class BlockStore:
         self.hashd[last] = index 
 
 
-
-
-def get_blocks_for_reads(fragments_path):
-    # Assume all the variant sites to be individual blocks.
-    # - two blocks can merge iff 
-    #   - the two blocks have a read in common. 
-    #   - merging these blocks where the probability of the P( b1 U b2  | h1 h2) / ( P(b1 | h1) * P(b2 | h2))
-    import ipdb;ipdb.set_trace()
+def greedy_selection():
     from tqdm import tqdm
-    global Frags, Quals, H, H1, H2, block_store, heap
+    import ipdb;ipdb.set_trace()
 
-
-    _, Frags, Quals = read_fragments(fragments_path)
-    Quals = np.power(10, -0.1* Quals)
-    H1, H2 = np.ones(Frags.shape[1]), np.zeros(Frags.shape[1])
-    H = [H1, H2]
-
-    block_store = BlockStore()   
-
-    blocks = [Block([i]) for i in range(Frags.shape[1])]
-    for block in blocks:
-        block_store.add(block)
+    global block_store
     
     heap = []
 
-    ipdb.set_trace()
-    import pickle
-    # if os.path.exists("heap.pkl"):
-    #     with open("heap.pkl", "rb") as fd:
-    #         heap = pickle.load(fd)
-    if not len(heap):
-        # Calculate it.
+    for i in tqdm(range(len(block_store.blocks))):
+        for j in range(len(block_store.blocks)):
+            if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
+                # There are no reads connecting the two blocks as of now, 
+                # Hence no need to check whether the two should be merged. 
+                continue
+            merged_block = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
+            # ed_val = merged_block.likelihood / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
 
-        for i in tqdm(range(len(block_store.blocks))):
-            for j in range(len(block_store.blocks)):
-                if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
-                    # There are no reads connecting the two blocks as of now, 
-                    # Hence no need to check whether the two should be merged. 
-                    continue
-                merged_block = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
-                # ed_val = merged_block.likelihood / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
-                
-                edge = Edge(block_store.blocks[i], block_store.blocks[j], merged_block)
-                heap.append(edge)
+            edge = Edge(block_store.blocks[i], block_store.blocks[j], merged_block)
+            heap.append(edge)
     
     ipdb.set_trace()
     heapq.heapify(heap)
@@ -294,8 +264,142 @@ def get_blocks_for_reads(fragments_path):
             break
 
         merge_blocks(b1, b2, merged)
+
+class Cluster(Block):
+    """
+    Same as Block, but can have more than one haplotype. 
+    """
+    def converge_with_extra_haps(self):
+        # modify self.hap
+        pass
+
+
+
+
+
+
+class ClusterStore(BlockStore):
+    def __init__(self, threshold=1.):
+        self.threshold = threshold
+
+    def get_min_dis(self, cluster):
+        min_distance = INF
+        min_cluster_idx = None
+        clusters = self.blocks
+
+        for cluster_idx, cluster in enumerate(clusters):
+            dis = cluster.get_dis(block)
+            if dis > min_distance:
+                min_distance = dis
+                min_cluster_idx = cluster_idx
+        return min_cluster_idx, min_distance
+    
+    def add_cluster(self, cluster):
+        # Decide which cluster:Block should be merged
+        # with this-cluster.
+        # cluster is nothing but a block.
+        min_cluster_idx, min_dis = self.get_min_dis(cluster)
+        if min_dis > self.threshold:
+            self.clusters.append(Cluster([block]))
+        else:
+            self.clusters[min_cluster_idx].add_block(block)
+
+
+               
+
+def merge_clusters(c1, c2):
+    pass
+
+
+
+def correlation_clustering():
+    global block_store, cluster_store
+
+    cluster_store = ClusterStore()
+
+    clusters = []
+    threshold = 1.       
+
+    cluster_heap = []
+    for block in block_store.blocks:
+        # Either add the block in one of existing
+        # clusters, based on greedy approach, threshold. 
+        # Create a new cluster containing block. 
+        cluster_store.add_cluster(block)
+
+    for i, cluster_1 in enumerate(cluster_store.clusters):
+            for j, cluster_2 in enumerate(cluster_store.clusters):
+                if i == j:
+                    continue
+                # Do a simple merge here without adding any new haplotype.
+                merged_cluster = cluster_1.likelihood_merge(cluster_2)
+                edge = Edge(cluster_1, cluster_2, merged_cluster)
+                cluster_heap.append(edge)
+                
+
+    # We now have a set of clusters, satisfying the property,
+    # the block goes into the cluster, iff the likelihood value 
+    # of the cluster increases.
+    #  
+    # We now keep merging the clusters 
+    #  - Choose the max value of V = P(C1, C2) / (P(C1)* P(C2)
+    #    - If V > 1. (threshold), merge the two clusters. 
+    #    - Else, V < 1. (threshold), merge the two clusters and 
+    #      also take an extra haplotype, which we believe should 
+    #      define a mismapped read.
+
+    while len(cluster_store.clusters) > 1:
+        # Keep merging until we get a single cluster.
+        # Check the clusters in the cluster_store
+        # and check if we can merge them.
+        max_edge = heapq.heappop(cluster_heap)
+        cluster_1, cluster_2, merged_cluster = max_edge.u, max_edge.v, max_edge.merged
+        if (cluster_1.hash() not in cluster_store.hashes or 
+                cluster_2.hash() not in cluster_store.hashes):
+                continue
+        # TODO: Add early breaking condition, using the likelihood function.    
+        merge_clusters(cluster_1, cluster_2)
+
+
+
+
+        
+                
+
+
+
+
+
+
+
+
+def get_blocks_for_reads(fragments_path, greedy=True):
+    # Assume all the variant sites to be individual blocks.
+    # - two blocks can merge iff 
+    #   - the two blocks have a read in common. 
+    #   - merging these blocks where the probability of the P( b1 U b2  | h1 h2) / ( P(b1 | h1) * P(b2 | h2))
+    import ipdb;ipdb.set_trace()
+    
+    global Frags, Quals, H, H1, H2, block_store, heap
+
+
+    _, Frags, Quals = read_fragments(fragments_path)
+    Quals = np.power(10, -0.1* Quals)
+    H1, H2 = np.ones(Frags.shape[1]), np.zeros(Frags.shape[1])
+    H = [H1, H2]
+
+    block_store = BlockStore()   
+
+    blocks = [Block([i]) for i in range(Frags.shape[1])]
+    for block in blocks:
+        block_store.add(block)
         
     import ipdb;ipdb.set_trace()
+    if greedy:
+        greedy_selection()
+    else:
+        correlation_clustering()
+
     
     return block_store     
 
