@@ -279,26 +279,33 @@ class Cluster(Block):
 
 
 class ClusterStore(BlockStore):
-    def __init__(self, threshold=1.):
-        self.threshold = threshold
+    def __init__(self, *args, **kwargs):
+        self.threshold = kwargs.pop("threshold", 1.)
+        super().__init__(*args, **kwargs)
 
-    def get_min_dis(self, cluster):
-        min_distance = INF
-        min_cluster_idx = None
+    def get_max_lik(self, cluster):
+        max_lik = -1*INF
+        max_cluster_idx = None
         clusters = self.blocks
+        max_merged_cluster = None
 
-        for cluster_idx, cluster in enumerate(clusters):
-            dis = cluster.get_dis(block)
-            if dis > min_distance:
-                min_distance = dis
-                min_cluster_idx = cluster_idx
+        for cluster_idx, clust_existing in enumerate(clusters):
+            merged_cluster = cluster.get_likelihood_of_merged(clust_existing)
+            if merged_cluster.likelihood > max_lik:
+                max_lik  = merged_cluster.likelihood
+                max_cluster_idx = cluster_idx
+                max_merged_cluster = merged_cluster
+        # merge the cluster with clusters[max_cluster_idx]
+        merge_blocks(cluster, clusters[max_cluster_idx], max_merged_cluster)
+                
+
         return min_cluster_idx, min_distance
     
     def add_cluster(self, cluster):
         # Decide which cluster:Block should be merged
         # with this-cluster.
         # cluster is nothing but a block.
-        min_cluster_idx, min_dis = self.get_min_dis(cluster)
+        min_cluster_idx, min_dis = self.get_max_lik(cluster)
         if min_dis > self.threshold:
             self.clusters.append(Cluster([block]))
         else:
@@ -314,28 +321,23 @@ def merge_clusters(c1, c2):
 
 def correlation_clustering():
     global block_store, cluster_store
-
+    threshold = 1.
     cluster_store = ClusterStore()
-
-    clusters = []
-    threshold = 1.       
+    for block in block_store.blocks:
+        cluster_store.add_cluster(block)
+      
 
     cluster_heap = []
-    for block in block_store.blocks:
-        # Either add the block in one of existing
-        # clusters, based on greedy approach, threshold. 
-        # Create a new cluster containing block. 
-        cluster_store.add_cluster(block)
 
-    for i, cluster_1 in enumerate(cluster_store.clusters):
-            for j, cluster_2 in enumerate(cluster_store.clusters):
+    for i, cluster_1 in enumerate(cluster_store.blocks):
+            for j, cluster_2 in enumerate(cluster_store.blocks):
                 if i == j:
                     continue
                 # Do a simple merge here without adding any new haplotype.
-                merged_cluster = cluster_1.likelihood_merge(cluster_2)
+                merged_cluster = cluster_1.get_likelihood_of_merge(cluster_2)
                 edge = Edge(cluster_1, cluster_2, merged_cluster)
                 cluster_heap.append(edge)
-                
+
 
     # We now have a set of clusters, satisfying the property,
     # the block goes into the cluster, iff the likelihood value 
