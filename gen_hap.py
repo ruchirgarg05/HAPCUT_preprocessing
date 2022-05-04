@@ -1,6 +1,6 @@
 
 
-from statistics import correlation
+
 from utils import *
 from sim_util import *
 import heapq
@@ -228,25 +228,35 @@ class BlockStore:
 
 def greedy_selection():
     from tqdm import tqdm
+    import pickle
     import ipdb;ipdb.set_trace()
-
+    import os
+    
     global block_store
     
-    heap = []
+    if os.path.exists("heap.pkl"):
+        with open("heap.pkl", "rb") as fd:
+            heap = pickle.load(fd)
+    else:        
+        heap = []
 
-    for i in tqdm(range(len(block_store.blocks))):
-        for j in range(len(block_store.blocks)):
-            if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
-                # There are no reads connecting the two blocks as of now, 
-                # Hence no need to check whether the two should be merged. 
-                continue
-            merged_block = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
-            # ed_val = merged_block.likelihood / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
+        for i in tqdm(range(len(block_store.blocks))):
+            for j in range(len(block_store.blocks)):
+                if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
+                    # There are no reads connecting the two blocks as of now, 
+                    # Hence no need to check whether the two should be merged. 
+                    continue
+                merged_block = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
+                # ed_val = merged_block.likelihood / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
 
-            edge = Edge(block_store.blocks[i], block_store.blocks[j], merged_block)
-            heap.append(edge)
-    
-    ipdb.set_trace()
+                edge = Edge(block_store.blocks[i], block_store.blocks[j], merged_block)
+                heap.append(edge)
+
+
+        ipdb.set_trace()
+        with open("heap.pkl", "wb") as fd:
+            pickle.dump(heap, fd)
+        
     heapq.heapify(heap)
     
     while heap:
