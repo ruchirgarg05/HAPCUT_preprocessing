@@ -4,6 +4,13 @@
 from utils import *
 from sim_util import *
 import heapq
+import warnings
+
+warnings.filterwarnings("error")
+
+def breakpoint():
+    import ipdb;ipdb.set_trace()
+    pass
 
 # Global Variables
 Frags, Quals = None, None
@@ -11,46 +18,19 @@ H, H1, H2 = None, None, None
 block_store = None
 cluster_store = None
 heap = None
+Blocks = []
 INF = 4e9
 
 # to maximize ( prod( P(partition | H (Subset(partion)) )) overall partions ) / (C * num_partitions)
 # C is a HyperParameter (Should be tuned) 
 C = 1.
 
-def get_likelihood_read_given_hap(read, qual, H):
-    """
-    P(r| H) = ( P(r | h1) +  P(r | h2) ) / 2
-    """
-    def likelihood_read_given_hap(h):
-        """
-        param read: read of len Frags[:, subset].shape[1]
-        param qual: qual of len Frags[:, subset].shape[1]
-        param h: Haplotype of len Frags[:, subset].shape[1] 
-        """
-        assert read.shape == qual.shape == h.shape
-        # Get all reads, i.e. ignnore the indexes having value nan. hea
-        indexes = np.argwhere(~np.isnan(read)).flatten()
-        likelihood = 1.
-        for idx in indexes:
-            if read[idx] == h[idx]:
-                likelihood *=  (1 - qual[idx])
-            else:
-                likelihood *= qual[idx]
-        
-        return likelihood
-
-
-    l1, l2 = likelihood_read_given_hap(H[0]), likelihood_read_given_hap(H[1])
-    
-    return (l1 + l2) / 2
-
-
-
 class Block:
     def __init__(self, cols, likelihood_h1=None, likelihood_h2=None, read_indexes=None):
-        self.cols = cols
+        self.cols = np.array(cols)
         self.likelihood_h1 = likelihood_h1
         self.likelihood_h2 = likelihood_h2
+        self._hap = None
         
         if read_indexes is None:
             read_idx = np.zeros(Frags.shape[0], dtype="bool")
@@ -62,22 +42,34 @@ class Block:
     
     @property
     def hap(self):
-        self._hap = [H1.take(self.cols), H2.take(self.cols)]
+        if self._hap is None:
+            self._hap = [H1.take(self.cols), H2.take(self.cols)]
         return self._hap
 
     @hap.setter
     def hap(self, haplotype):
         self._hap = haplotype
- 
+    
+    
+    
     @property
     def likelihood(self):
         return self.get_likelihood_given_haplotype() 
 
     def hash(self):
         return hash(tuple(self.cols))
-
+    
+    def get_reads(self):
+        return Frags[self.read_indexes][:, self.cols]
+    
+    def get_intersecting_reads(self, other):
+        r_idxs = np.intersect1d(self.read_indexes, other.read_indexes)
+        cols = np.concatenate([self.cols, other.cols])
+        return Frags[r_idxs, :][:, cols]
+    
     def is_connected(self, other):
-        if len(set(self.read_indexes).intersection(other.read_indexes)):
+        if len(np.intersect1d(self.read_indexes, other.read_indexes)):
+        # if len(set(self.read_indexes).intersection(other.read_indexes)):
             return True
         return False
 
@@ -108,13 +100,21 @@ class Block:
             like_h1[nan_reads] = 1. 
             like_h2[nan_reads] = 1.
 
-            self.likelihood_h1, self.likelihood_h2 = np.ones(Frags.shape[0]), np.ones(Frags.shape[0])
+            # self.likelihood_h1, self.likelihood_h2 = np.ones(Frags.shape[0]), np.ones(Frags.shape[0])
+            self.likelihood_h1, self.likelihood_h2 = np.zeros(Frags.shape[0]), np.zeros(Frags.shape[0])
 
-            self.likelihood_h1[read_indexes], self.likelihood_h2[read_indexes] = like_h1.prod(axis=1), like_h2.prod(axis=1)
+            # self.likelihood_h1[read_indexes] = like_h1.prod(axis=1)
+            # self.likelihood_h2[read_indexes] = like_h2.prod(axis=1)
+            self.likelihood_h1[read_indexes] = np.log(like_h1.prod(axis=1))
+            self.likelihood_h2[read_indexes] = np.log(like_h2.prod(axis=1))
+            
 
-        likelihoods =  (self.likelihood_h1 + self.likelihood_h2) / 2
-        likelihoods = np.prod(likelihoods)
-        return np.prod(likelihoods)
+        # likelihoods =  (self.likelihood_h1 + self.likelihood_h2) / 2
+        likelihoods = np.logaddexp(self.likelihood_h1, self.likelihood_h2) - np.log(2)
+        
+        # block_likelihood = np.prod(likelihoods)
+        block_likelihood = np.sum(likelihoods)
+        return block_likelihood
 
 
 
@@ -126,8 +126,10 @@ class Block:
         # Get the value of P( b1 U b2  | h1 h2) / ( P(b1 | h1) * P(b2 | h2)).
         h11, h12 = self.hap
         h21, h22 = other.hap
+        assert not len(np.intersect1d(self.cols, other.cols))
 
-        cols = list(set(self.cols + other.cols))
+        cols = np.concatenate([self.cols, other.cols])
+        
         read_indexes = np.unique( np.concatenate([self.read_indexes, other.read_indexes]) )
 
         hap1 = [np.concatenate([h11, h21]), np.concatenate([h12, h22])]
@@ -135,14 +137,24 @@ class Block:
         hap_phased, hap_unphased = hap1, hap2
         _, __ = self.likelihood, other.likelihood
 
-        lik_phased_h1 = self.likelihood_h1 * other.likelihood_h1
-        lik_phased_h2 = self.likelihood_h2 * other.likelihood_h2
+        # lik_phased_h1 = self.likelihood_h1 * other.likelihood_h1
+        # lik_phased_h2 = self.likelihood_h2 * other.likelihood_h2
 
-        lik_unphased_h1 = self.likelihood_h1 * other.likelihood_h2
-        lik_unphased_h2 = self.likelihood_h2 * other.likelihood_h1
-
-        likelihood_phased = np.prod((lik_phased_h1 + lik_phased_h2)/2)
-        likelihood_unphased = np.prod((lik_unphased_h1 + lik_unphased_h2)/2)
+        # lik_unphased_h1 = self.likelihood_h1 * other.likelihood_h2
+        # lik_unphased_h2 = self.likelihood_h2 * other.likelihood_h1
+        
+        # likelihood_phased = np.prod((lik_phased_h1 + lik_phased_h2)/2)
+        # likelihood_unphased = np.prod((lik_unphased_h1 + lik_unphased_h2)/2)
+        
+        lik_phased_h1 = self.likelihood_h1 + other.likelihood_h1
+        lik_phased_h2 = self.likelihood_h2 + other.likelihood_h2
+        
+        lik_unphased_h1 = self.likelihood_h1 + other.likelihood_h2
+        lik_unphased_h2 = self.likelihood_h2 + other.likelihood_h1
+        
+        likelihood_phased = np.sum(np.logaddexp(lik_phased_h1, lik_phased_h2) - np.log(2))       
+        likelihood_unphased = np.sum(np.logaddexp(lik_unphased_h1, lik_unphased_h2) - np.log(2))
+        
 
         if likelihood_phased > likelihood_unphased:
             # the merged block should be in phase
@@ -180,12 +192,9 @@ class Edge:
         self.u = u
         self.v = v
         self.merged = merged
-        try:
-            self.lik = self.merged.likelihood / (self.u.likelihood * self.v.likelihood)
-        except:
-            import ipdb;ipdb.set_trace()
-        if not self.u.likelihood or not self.v.likelihood:
-            import ipdb;ipdb.set_trace()
+        # self.lik = self.merged.likelihood / (self.u.likelihood * self.v.likelihood)
+        self.lik = self.merged.likelihood - (self.u.likelihood + self.v.likelihood)
+
 
     def __lt__(self, other):
         # Override the __lt__ for max heap
@@ -239,8 +248,7 @@ def greedy_selection():
     
     global block_store, heap
     heap = []
-    len_blocks = len(block_store.blocks) 
-    len_blocks = len_blocks // 10
+    len_blocks = len(block_store.blocks)
     for i in tqdm(range(len_blocks)):
         for j in range(len_blocks):
             if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
@@ -248,14 +256,13 @@ def greedy_selection():
                 # Hence no need to check whether the two should be merged. 
                 continue
             merged_block = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
-            # ed_val = merged_block.likelihood / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
-
+            
             edge = Edge(block_store.blocks[i], block_store.blocks[j], merged_block)
             heap.append(edge)
 
         
     heapq.heapify(heap)
-    ipdb.set_trace()
+    import ipdb;ipdb.set_trace()
     
     while heap:
         max_edge = heapq.heappop(heap)
@@ -268,85 +275,75 @@ def greedy_selection():
         num_partitions = len(block_store.blocks)
         # Breaking condition, if this does not hold
         # the overall likelihood decreases.
-        if np.log(val) < C*np.log(1 - 1/num_partitions):
+        # if np.log(val) < C*np.log(1 - 1/num_partitions):
+        
+        # This seems to prevent few of the merges. 
+        
+        if val < C*(1 - 1/num_partitions):    
             break
+        
 
         merge_blocks(b1, b2, merged)
-
-class Cluster(Block):
-    """
-    Same as Block, but can have more than one haplotype. 
-    """
-    def converge_with_extra_haps(self):
-        # modify self.hap
-        pass
+    import ipdb;ipdb.set_trace()    
 
 
 
 
 
 
-class ClusterStore(BlockStore):
-    def __init__(self, *args, **kwargs):
-        self.threshold = kwargs.pop("threshold", 1.)
-        super().__init__(*args, **kwargs)
 
-    def get_max_lik(self, cluster):
-        max_lik = -1*INF
-        max_cluster_idx = None
-        clusters = self.blocks
-        max_merged_cluster = None
-
-        for cluster_idx, clust_existing in enumerate(clusters):
-            merged_cluster = cluster.get_likelihood_of_merged(clust_existing)
-            if merged_cluster.likelihood > max_lik:
-                max_lik  = merged_cluster.likelihood
-                max_cluster_idx = cluster_idx
-                max_merged_cluster = merged_cluster
-        # merge the cluster with clusters[max_cluster_idx]
-        merge_blocks(cluster, clusters[max_cluster_idx], max_merged_cluster)
-                
-
-        return min_cluster_idx, min_distance
+def correlation_clustering(threshold=0.):
+    from tqdm import tqdm
+    from copy import deepcopy
     
-    def add_cluster(self, cluster):
-        # Decide which cluster:Block should be merged
-        # with this-cluster.
-        # cluster is nothing but a block.
-        min_cluster_idx, min_dis = self.get_max_lik(cluster)
-        if min_dis > self.threshold:
-            self.clusters.append(Cluster([block]))
+    global Blocks
+
+    len_blocks = len(Blocks)
+    
+    clusters = []
+    for i in tqdm(range(len_blocks)):
+        new_block = Blocks[i]
+        if not len(clusters.blocks):
+            clusters.append(new_block)
         else:
-            self.clusters[min_cluster_idx].add_block(block)
-
-
-               
-
-def merge_clusters(c1, c2):
-    pass
-
-
-
-def correlation_clustering():
-    global block_store, cluster_store
-    threshold = 1.
-    cluster_store = ClusterStore()
-    for block in block_store.blocks:
-        cluster_store.add_cluster(block)
-      
-
-    cluster_heap = []
-
-    for i, cluster_1 in enumerate(cluster_store.blocks):
-            for j, cluster_2 in enumerate(cluster_store.blocks):
-                if i == j:
-                    continue
-                # Do a simple merge here without adding any new haplotype.
-                merged_cluster = cluster_1.get_likelihood_of_merge(cluster_2)
-                edge = Edge(cluster_1, cluster_2, merged_cluster)
-                cluster_heap.append(edge)
-
-
+            max_lik_cluster = None
+            cluster_idx = None
+            max_lik = threshold
+            for idx, cluster in enumerate(clusters):
+                merged = cluster.get_likelihood_merged(new_block)
+                if merged.likelihood > max_lik:
+                    max_lik = merged.likelihood
+                    max_lik_cluster = merged
+                    cluster_idx = idx
+            if cluster_idx is None:
+                # Does not go with any of the clusters, 
+                # add a new cluster.
+                clusters.append(new_block)
+            
+            if cluster_idx is not None:
+                clusters[cluster_idx] = max_lik_cluster
+    
+    # No need of Blocks now.
+    del Blocks
+    cluster_store = BlockStore()
+    for block in clusters:
+        cluster_store.add(block)
+        
+    # Initial clustering done. clusters stored in cluster_store
+                   
+    
+    global heap
+    heap = []
+    
+    
+    for i in tqdm(range(len(cluster_store.blocks))):
+        for j in range(len(cluster_store.blocks)):
+            if i == j or not cluster_store[i].is_connected(cluster_store[j]):
+                continue
+            merged_block = cluster_store[i].get_likelihood_merged(cluster_store[j])
+            edge = Edge(cluster_store[i], cluster_store[j], merged_block)
+            heap.append(edge)
+ 
     # We now have a set of clusters, satisfying the property,
     # the block goes into the cluster, iff the likelihood value 
     # of the cluster increases.
@@ -357,18 +354,74 @@ def correlation_clustering():
     #    - Else, V < 1. (threshold), merge the two clusters and 
     #      also take an extra haplotype, which we believe should 
     #      define a mismapped read.
+    
+    heapq.heapify(heap)
+    while heap:
+        max_edge = heapq.heappop(heap)
+        val, b1, b2, merged = max_edge.lik, max_edge.u, max_edge.v, max_edge.merged
+        # Check both b1 and b2 are present in the block_store
+        # if not simply continue as this is not a valid edge anymore.
+        if b1.hash() not in block_store.hashes or b2.hash() not in block_store.hashes:
+            continue
 
-    while len(cluster_store.clusters) > 1:
-        # Keep merging until we get a single cluster.
-        # Check the clusters in the cluster_store
-        # and check if we can merge them.
-        max_edge = heapq.heappop(cluster_heap)
-        cluster_1, cluster_2, merged_cluster = max_edge.u, max_edge.v, max_edge.merged
-        if (cluster_1.hash() not in cluster_store.hashes or 
-                cluster_2.hash() not in cluster_store.hashes):
-                continue
-        # TODO: Add early breaking condition, using the likelihood function.    
-        merge_clusters(cluster_1, cluster_2)
+        num_partitions = len(cluster_store.blocks)
+        if val < C*(1 - 1/num_partitions):
+            merge_mismapped_blocks(b1, b2, merged)
+        else:
+            merge_blocks(b1, b2, merged)
+    return cluster_store        
+                
+              
+        
+def merge_mismapped_blocks(b1, b2, b1b2):
+    """Check if adding an H_{n+1} in H [H1, H2, .. H_{n}] makes the likelihood 
+    better and by howmuch.
+
+    Args:
+        b1 (_type_): _description_
+        b2 (_type_): _description_
+        b1b2 (_type_): _description_
+    """
+    # threshold is the minimum likelihood of the read getting sampled
+    # from the existing vakues of H. 
+    # If all the values are less than threshold try to further improve 
+    # the values of H1, H2...Hn
+    read_indexes = b1b2.read_indexes
+    # tau is specified as the quality of the total read, given
+    # all the values of h1, h2,..h_n
+    tau = 0.9
+    cols = b1b2.cols
+    reads, quals = Frags.take(read_indexes, axis=0), Quals.take(read_indexes, axis=0)
+    reads, quals = reads.take(cols, axis=1), quals.take(cols, axis=1)
+    
+    hap_likelihood = []
+    qual_reads = np.zeros(read_indexes.shape, dtype="bool") 
+    for j, hap in enumerate(b1b2.hap):
+        correct_read = np.array(reads == hap).astype("int32")
+        # element wise multiplication.
+        like_hap = (1 - 2*quals) * correct_read + quals
+        
+        like_hap_row = like_hap.prod(axis=1)
+        like_great_than_thresh = like_hap_row > tau 
+        qual_reads |= like_great_than_thresh
+        hap_likelihood.append(like_hap)
+    
+    # Stores the values of h_i which matches most to each read
+    h_indexes = np.argmax(np.array(hap_likelihood), axis=0)
+    assert reads.shape[0] == h_indexes.shape[0]
+    
+        
+        
+        
+        
+        
+        
+     
+    
+    
+    
+                    
+
 
 
 
@@ -378,45 +431,65 @@ def correlation_clustering():
 
 
 
+def read_heter_fragments(fragments_path, vcf_path):
+    import allel
+    _, Frag, Quals = read_fragments(fragments_path)
+    callset = allel.read_vcf(vcf_path)
+    filter = callset["variants/FILTER_PASS"]
+    ls_01 = np.all(np.equal(callset['calldata/GT'], [0,1]), axis=2).T[0]
+    ls_10 = np.all(np.equal(callset['calldata/GT'], [1,0]), axis=2).T[0]
+    ls_het = ls_01 | ls_10
+    filter = filter & ls_het
+    return Frag[:, filter], Quals[:, filter]
 
 
 
 
-
-def get_blocks_for_reads(fragments_path, greedy=True):
+def get_blocks_for_reads(fragments_path, vcf_path=None,  greedy=True):
     # Assume all the variant sites to be individual blocks.
     # - two blocks can merge iff 
     #   - the two blocks have a read in common. 
     #   - merging these blocks where the probability of the P( b1 U b2  | h1 h2) / ( P(b1 | h1) * P(b2 | h2))
     import ipdb;ipdb.set_trace()
     
-    global Frags, Quals, H, H1, H2, block_store, heap
+    global Frags, Quals, H, H1, H2, block_store, heap, Blocks
 
 
-    _, Frags, Quals = read_fragments(fragments_path)
+    Frags, Quals = read_heter_fragments(fragments_path, vcf_path)
     Quals = np.power(10, -0.1* Quals)
     H1, H2 = np.ones(Frags.shape[1]), np.zeros(Frags.shape[1])
     H = [H1, H2]
 
     block_store = BlockStore()   
     num_variants = Frags.shape[1]
-    blocks = [Block([i]) for i in range(num_variants/10)]
-    for block in blocks:
-        block_store.add(block)
+    num_variants = num_variants//10
+    Blocks = [Block([i]) for i in range(num_variants)]
         
     import ipdb;ipdb.set_trace()
     if greedy:
+        for block in Blocks:
+            block_store.add(block)
+        del Blocks    
         greedy_selection()
     else:
         correlation_clustering()
     import ipdb;ipdb.set_trace() 
     
+    # TODO: If two block A is not connected with block B and also 
+    # is not connected with block C, choose the block which is 
+    # nearer to A, and merge the two blocks to one.
+    # As this would not affect the total likelihood, but reduce
+    # the number of partitions by 1.  
+    
     return block_store     
 
 
 
-def merge_blocks(b1, b2, b1b2):
-    # Merge blocks and change the value of the haplotype block. 
+def merge_blocks(b1, b2, b1b2, debug=False):
+    if debug:
+        print(f"{b1.cols} {b2.cols} \n {b1b2.get_reads()[:10]} \n {b1b2.hap}")
+    # Merge blocks and change the value of the haplotype block.
+    # import ipdb;ipdb.set_trace() 
     new_block = b1b2
     global block_store, H, H1, H2, heap
     try:
@@ -424,6 +497,7 @@ def merge_blocks(b1, b2, b1b2):
         block_store.remove(b2)
     except:
         import ipdb;ipdb.set_trace()
+        print("Some problem occured while deleting the previous blocks")
         block_store.remove(b1)
         block_store.remove(b2)  
      
@@ -434,12 +508,10 @@ def merge_blocks(b1, b2, b1b2):
     # Go through all the connected blocks of b1 and b2 and
     # add new edges to the heap
     for block in block_store.blocks:
-        if block.is_connected(new_block) and not len(set(block.cols).intersection(new_block.cols)):
-            try:
-                nb = new_block.get_likelihood_of_merged(block)
-            except:
-                import ipdb;ipdb.set_trace()
-                pass
+        if (block.is_connected(new_block) and 
+            # Check the merges should be performed on non overlapping blocks. 
+            not len(np.intersect1d(block.cols, new_block.cols))):
+            nb = new_block.get_likelihood_of_merged(block)
             edge = Edge(new_block, block, nb)
             heapq.heappush(heap, edge)
     return        
