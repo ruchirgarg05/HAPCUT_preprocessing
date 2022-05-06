@@ -180,7 +180,12 @@ class Edge:
         self.u = u
         self.v = v
         self.merged = merged
-        self.lik = self.merged.likelihood / (self.u.likelihood * self.v.likelihood)
+        try:
+            self.lik = self.merged.likelihood / (self.u.likelihood * self.v.likelihood)
+        except:
+            import ipdb;ipdb.set_trace()
+        if not self.u.likelihood or not self.v.likelihood:
+            import ipdb;ipdb.set_trace()
 
     def __lt__(self, other):
         # Override the __lt__ for max heap
@@ -232,32 +237,25 @@ def greedy_selection():
     import ipdb;ipdb.set_trace()
     import os
     
-    global block_store
-    
-    if os.path.exists("heap.pkl"):
-        with open("heap.pkl", "rb") as fd:
-            heap = pickle.load(fd)
-    else:        
-        heap = []
+    global block_store, heap
+    heap = []
+    len_blocks = len(block_store.blocks) 
+    len_blocks = len_blocks // 10
+    for i in tqdm(range(len_blocks)):
+        for j in range(len_blocks):
+            if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
+                # There are no reads connecting the two blocks as of now, 
+                # Hence no need to check whether the two should be merged. 
+                continue
+            merged_block = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
+            # ed_val = merged_block.likelihood / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
 
-        for i in tqdm(range(len(block_store.blocks))):
-            for j in range(len(block_store.blocks)):
-                if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
-                    # There are no reads connecting the two blocks as of now, 
-                    # Hence no need to check whether the two should be merged. 
-                    continue
-                merged_block = block_store.blocks[i].get_likelihood_of_merged(block_store.blocks[j])
-                # ed_val = merged_block.likelihood / (block_store.blocks[i].likelihood * block_store.blocks[j].likelihood)
+            edge = Edge(block_store.blocks[i], block_store.blocks[j], merged_block)
+            heap.append(edge)
 
-                edge = Edge(block_store.blocks[i], block_store.blocks[j], merged_block)
-                heap.append(edge)
-
-
-        ipdb.set_trace()
-        with open("heap.pkl", "wb") as fd:
-            pickle.dump(heap, fd)
         
     heapq.heapify(heap)
+    ipdb.set_trace()
     
     while heap:
         max_edge = heapq.heappop(heap)
@@ -401,8 +399,8 @@ def get_blocks_for_reads(fragments_path, greedy=True):
     H = [H1, H2]
 
     block_store = BlockStore()   
-
-    blocks = [Block([i]) for i in range(Frags.shape[1])]
+    num_variants = Frags.shape[1]
+    blocks = [Block([i]) for i in range(num_variants/10)]
     for block in blocks:
         block_store.add(block)
         
@@ -411,7 +409,7 @@ def get_blocks_for_reads(fragments_path, greedy=True):
         greedy_selection()
     else:
         correlation_clustering()
-
+    import ipdb;ipdb.set_trace() 
     
     return block_store     
 
@@ -420,7 +418,7 @@ def get_blocks_for_reads(fragments_path, greedy=True):
 def merge_blocks(b1, b2, b1b2):
     # Merge blocks and change the value of the haplotype block. 
     new_block = b1b2
-    global block_store, H, H1, H2
+    global block_store, H, H1, H2, heap
     try:
         block_store.remove(b1)
         block_store.remove(b2)
