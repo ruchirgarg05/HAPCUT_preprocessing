@@ -45,6 +45,7 @@ def get_likelihood_read_given_hap(read, qual, H):
     return (l1 + l2) / 2
 
 
+
 class Block:
     def __init__(self, cols, likelihood_h1=None, likelihood_h2=None, read_indexes=None):
         self.cols = cols
@@ -239,7 +240,7 @@ def greedy_selection():
     global block_store, heap
     heap = []
     len_blocks = len(block_store.blocks) 
-    # len_blocks = len_blocks // 10
+    len_blocks = len_blocks // 10
     for i in tqdm(range(len_blocks)):
         for j in range(len_blocks):
             if i == j or not block_store.blocks[i].is_connected(block_store.blocks[j]):
