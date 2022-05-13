@@ -1,10 +1,12 @@
 
 
 
+from copy import deepcopy
 from utils import *
 from sim_util import *
 import heapq
 import warnings
+from tqdm import tqdm
 
 warnings.filterwarnings("error")
 
@@ -205,10 +207,16 @@ class Edge:
 # O(log(n)) insertion, 0(1) deletion
 
 class BlockStore:
-    def __init__(self):
+    def __init__(self, blocks=[]):
         self.blocks = []
         self.hashd = {}
         self.hashes = set()
+        
+        if len(blocks):
+            for block in blocks:
+                self.add(block)
+                
+        
     
     def add(self, block):
         # O(1) insert
@@ -286,6 +294,168 @@ def greedy_selection():
         merge_blocks(b1, b2, merged)
     import ipdb;ipdb.set_trace()    
 
+
+class BeamState:
+    def __init__(self, include, exclude, likelihood=1.):
+        self.include = set(include)
+        self.exclude = set(exclude)
+        self.likelihood = likelihood
+        
+    def include_exclude(self, include, exclude, likelihood):
+        include, exclude = set(include), set(exclude)   
+        include = self.include - exclude | include 
+        exclude = self.exclude | exclude
+        return BeamState(include=include, exclude=exclude, 
+                         likelihood=self.likelihood + likelihood)
+    
+    def cols(self):
+        cols = set()
+        for block in self.include:
+            cols |= set(block.cols)
+        return tuple(sorted(list(cols)))
+            
+    
+    def __eq__(self, other):
+        return self.__hash__() == other.__hash__() 
+    
+    def __hash__(self):
+        return hash(self.cols())           
+    
+    def __lt__(self, other):
+        # override the __lt__ for max heap
+        return self.likelihood > other.likelihood    
+        
+
+def beam_search_block(blocks, k):
+    heap_blocks = []
+    for i in tqdm(range(len(blocks))):
+        for j in range(i+1, len(blocks)):
+            b1, b2 = blocks[i], blocks[j]
+            if not b1.is_connected(b2):
+                continue 
+              
+            merged_block = b1.get_likelihood_of_merged(b2)
+            edge = Edge(b1, b2, merged_block)
+            heap_blocks.append(edge)
+                        
+    
+                
+    def get_top_k(beam_state):
+        include, exclude = beam_state.include, beam_state.exclude
+        
+        tmp_heap = list(heap_blocks)
+        
+        top_k_merges = []
+        nheap = []
+        
+        nblocks = set(blocks) - exclude | include 
+        
+        for blocki in include:
+            for blockj in nblocks:
+                if blocki == blockj or not blocki.is_connected(blockj):
+                    continue
+                merged_block = blocki.get_likelihood_of_merged(blockj)
+                edge = Edge(blocki, blockj, merged_block)
+                nheap.append(edge)
+                
+        tmp_heap += nheap        
+        heapq.heapify(tmp_heap)
+        
+        while len(top_k_merges) != k:
+            edge = heapq.heappop(tmp_heap)
+            b1, b2, b12 = edge.u, edge.v, edge.merged
+            if any(b in exclude for b in [b1, b2, b12]):
+                continue
+            top_k_merges.append(edge)
+        
+        return top_k_merges            
+                
+
+
+    # Now we have a tmp_heap which stores the merged blocks with 
+    # included to other blocks.    
+    def sort_and_pick_top_k(beam_col):
+        heapq.heapify(beam_col)
+        return heapq.nsmallest(k, beam_col)
+    
+
+    heapq.heapify(heap_blocks)
+    # for k = 1, beam search is greedy search.
+    num_merges = len(blocks) - 1
+    beam = []
+    
+    max_likelihood_state = None
+    
+    for i in range(num_merges):
+        
+        beam_col = []
+        
+        
+        if not len(beam):
+            # Initialize beam of length k. 
+            k_edges = heapq.nsmallest(k, heap_blocks)
+            
+            beam = [[BeamState(exclude=[edge.u, edge.v], 
+                               include =[edge.merged], 
+                               likelihood=edge.lik) for edge in k_edges]]
+            
+        for bs in beam[-1]:
+            # Calculate the new likelihood of this merged with other blocks
+            top_k_edges = get_top_k(bs)
+            
+            for edge in top_k_edges:
+                b1, b2, b12, lik = edge.u, edge.v, edge.merged, edge.lik
+                nbs = bs.include_exclude(include = [b12], exclude=[b1, b2], likelihood=lik)
+                
+                beam_col.append(nbs)
+        # It might be the case that some of the beam states are same, 
+        # as they ended up merging the same cols in different order.         
+        beam_col = list(set(beam_col))    
+        beam_col = sort_and_pick_top_k(beam_col)
+        if not max_likelihood_state:
+            max_likelihood_state = beam_col[0]
+        if max_likelihood_state.likelihood < beam_col[0].likelihood:
+            max_likelihood_state = beam_col[0]    
+          
+        beam.append(beam_col)
+    
+    # Now we need to pick the top element 
+    # this element has the maximum likelihood 
+    return max_likelihood_state
+        
+        
+
+def beam_search(beam_size=3):
+    num_chunks = 1
+    # At each time step, keep the top k possible merges. 
+    # For each of the top k merges, 
+    #     - calculate the value of the next k biggest merges
+    # Sort and pick the top k of these mreges, and 
+    # keep going forward. 
+    import ipdb;ipdb.set_trace()
+    num_variants = len(block_store.blocks)
+    chunk_size = num_variants // num_chunks
+    chunk_ranges = [(i*chunk_size, (i+1)*chunk_size) for i in range(num_chunks)]
+    
+    max_likelihood_states = [None for _ in range(num_chunks)]
+    
+    
+    for i, (l, r) in tqdm(enumerate(chunk_ranges)):
+        # Get one block per beam
+        max_likelihood_states[i] = beam_search_block(blocks = block_store.blocks[l:r],
+                                            k = beam_size)
+        
+    
+    # Problem: Since the number of merges for cols of length
+    #          n would be n, and for n >> k, the method would 
+    #          approximate the greedy result.
+    # Hence for each of the beams we should work on a smaller chunk. 
+    
+    # How to partition the chunks ?    
+    # Perform the merge, and then store the value of the mer
+    
+    chunk_size = N
+    pass
 
 
 
@@ -382,6 +552,10 @@ def merge_mismapped_blocks(b1, b2, b1b2):
         b2 (_type_): _description_
         b1b2 (_type_): _description_
     """
+    # TODO: Optimize this function. 
+    
+    def consensus():
+        pass
     # threshold is the minimum likelihood of the read getting sampled
     # from the existing vakues of H. 
     # If all the values are less than threshold try to further improve 
@@ -410,7 +584,21 @@ def merge_mismapped_blocks(b1, b2, b1b2):
     h_indexes = np.argmax(np.array(hap_likelihood), axis=0)
     assert reads.shape[0] == h_indexes.shape[0]
     
+    converged = False
+    while not converged:    
+        prev_haps = b1b2.hap
         
+        converged = True
+        for i in range(prev_haps.shape[0]):
+            h_r_idxs = np.where(h_indexes == i)
+            curr_hap = consensus(reads[h_r_idxs, :])
+            if curr_hap != prev_haps[i]:
+                converged = False
+                prev_haps[i] = curr_hap
+                
+    # If converged and there are values, whose likelihood is still less
+    # than tau, create a new H on the indexes which mismatch the h_{argmax}
+    H3 = np.nan(H1.shape)
         
         
         
@@ -445,7 +633,7 @@ def read_heter_fragments(fragments_path, vcf_path):
 
 
 
-def get_blocks_for_reads(fragments_path, vcf_path=None,  greedy=True):
+def get_blocks_for_reads(fragments_path, vcf_path=None,  greedy=False, beam=True):
     # Assume all the variant sites to be individual blocks.
     # - two blocks can merge iff 
     #   - the two blocks have a read in common. 
@@ -466,11 +654,13 @@ def get_blocks_for_reads(fragments_path, vcf_path=None,  greedy=True):
     Blocks = [Block([i]) for i in range(num_variants)]
         
     import ipdb;ipdb.set_trace()
-    if greedy:
-        for block in Blocks:
-            block_store.add(block)
-        del Blocks    
-        greedy_selection()
+    if greedy or beam:
+        block_store = BlockStore(Blocks)
+        del Blocks
+        if greedy:
+            greedy_selection()
+        else:
+            beam_search()    
     else:
         correlation_clustering()
     import ipdb;ipdb.set_trace() 
